@@ -60,14 +60,31 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Publish if this version is not already on crates.io
+        env:
+          # cargo reads the token from this env var; passing --token is deprecated.
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           meta=$(cargo metadata --no-deps --format-version 1)
           name=$(echo "$meta" | python3 -c "import sys,json;print(json.load(sys.stdin)['packages'][0]['name'])")
           version=$(echo "$meta" | python3 -c "import sys,json;print(json.load(sys.stdin)['packages'][0]['version'])")
-          # Query the crates.io API directly (no index lag).
-          code=$(curl -s -o /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/$name/$version")
+          # Query the crates.io API directly (no index lag). The API rejects
+          # requests without a User-Agent (403), so send one or the guard below
+          # never matches and we'd always attempt a redundant publish.
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "User-Agent: sparebank1-cli release workflow (github.com/magnusrodseth/sparebank1-cli)" \
+            "https://crates.io/api/v1/crates/$name/$version")
           if [ "$code" = "200" ]; then
             echo "$name v$version already on crates.io, skipping."
-          else
-            cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+            exit 0
           fi
+          # Belt and suspenders: if a manual publish raced this run, treat
+          # "already exists" as success instead of failing the release.
+          if ! out=$(cargo publish 2>&1); then
+            echo "$out"
+            if echo "$out" | grep -q "already exists"; then
+              echo "Already on crates.io, treating as success."
+              exit 0
+            fi
+            exit 1
+          fi
+          echo "$out"
