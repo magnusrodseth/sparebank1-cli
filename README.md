@@ -23,11 +23,39 @@ Treat your bank as data, not a dashboard. The bank's app is great for glancing
 at your money; `sb1` is for everything the app can't do, scripting, automation,
 and especially AI agents that reason over your finances.
 
-| Use case | What it looks like | Try |
-| --- | --- | --- |
-| **Ask an agent about your money** | Natural-language Q&A over accounts and transactions: "where did my money go last month?", "what subscriptions am I paying for?", "did my paycheck arrive?", "help me optimize my finances: where do I sløse, what can I improve, and where am I inconsistent?" An agent chains the commands and reasons over the JSON, no fixed dashboard required. | `sb1 --json summary`<br>`sb1 --json transactions --classified` |
-| **Automate the boring parts** | Scheduled balance checks, monthly reports, "is the balance below X?", paycheck-arrival checks. Pair `--json` with cron or any task runner. | `sb1 --json accounts`<br>`sb1 --json transactions --days 30` |
-| **Own your financial data** | One-command export into your own spreadsheets, budgeting app, or notes, so you keep a longitudinal history instead of the bank's fixed, current-only view. | `sb1 export -a Brukskonto -o booked.csv` |
+### Ask an agent about your money
+
+Natural-language Q&A over your accounts and transactions, no fixed dashboard
+required. The agent chains the commands and reasons over the JSON:
+
+- "Where did my money go last month?"
+- "What subscriptions am I paying for?"
+- "Did my paycheck arrive?"
+- "Help me optimize my finances: where do I sløse, what can I improve, and where am I inconsistent?"
+
+```bash
+sb1 --json summary
+sb1 --json transactions --classified
+```
+
+### Automate the boring parts
+
+Scheduled balance checks, monthly reports, paycheck-arrival checks, "is the
+balance below X?". Pair `--json` with cron or any task runner:
+
+```bash
+sb1 --json accounts
+sb1 --json transactions --days 30
+```
+
+### Own your financial data
+
+One-command export into your own spreadsheets, budgeting app, or notes, so you
+keep a longitudinal history instead of the bank's fixed, current-only view:
+
+```bash
+sb1 export -a Brukskonto -o booked.csv
+```
 
 For everyday balance-glancing on the go, the bank's own app is still the better
 tool; reach for `sb1` when you want your money as something you can query,
