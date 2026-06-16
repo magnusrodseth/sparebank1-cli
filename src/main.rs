@@ -1,4 +1,4 @@
-//! `sb1` — a feature-complete CLI for the SpareBank 1 personal banking API.
+//! `sb1`: a feature-complete CLI for the SpareBank 1 personal banking API.
 //!
 //! Usage of the underlying API is governed by the bank's terms; see
 //! [`crate::terms`] for the clauses that shape this client's behaviour

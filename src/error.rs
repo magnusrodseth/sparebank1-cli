@@ -10,15 +10,15 @@ use thiserror::Error;
 /// rotate it").
 #[derive(Debug, Error)]
 pub enum Sb1Error {
-    /// No usable token on disk/keychain — the user must run `sb1 login`.
-    #[error("not logged in — run `sb1 login` first")]
+    /// No usable token on disk/keychain, the user must run `sb1 login`.
+    #[error("not logged in, run `sb1 login` first")]
     NotAuthenticated,
 
     /// The client secret was rejected. Per terms §3 the secret has limited
     /// validity, so this most often means it has expired and must be rotated.
     #[error(
         "client credentials were rejected by SpareBank 1.\n\
-         The client secret has limited validity (terms §3) — it has most likely \
+         The client secret has limited validity (terms §3); it has most likely \
          expired.\n\
          Rotate it at https://developer.sparebank1.no and run `sb1 login` again."
     )]
@@ -26,7 +26,7 @@ pub enum Sb1Error {
 
     /// The API enforced a rate limit (HTTP 429). We do not circumvent limits
     /// (terms §6); the caller should back off and try again later.
-    #[error("rate limited by SpareBank 1 (HTTP 429){}; please wait and try again — this tool does not bypass rate limits (terms §6)", retry_after.map(|s| format!(", retry after {s}s")).unwrap_or_default())]
+    #[error("rate limited by SpareBank 1 (HTTP 429){}; please wait and try again. This tool does not bypass rate limits (terms §6)", retry_after.map(|s| format!(", retry after {s}s")).unwrap_or_default())]
     RateLimited { retry_after: Option<u64> },
 
     /// A structured error response from the API (the `errors` array).

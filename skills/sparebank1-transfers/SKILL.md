@@ -1,6 +1,6 @@
 ---
 name: sparebank1-transfers
-description: Move money with the `sb1` CLI (SpareBank 1) — transfer between the user's own accounts, pay a credit card, or pay into a pension policy. Use when a user explicitly asks to transfer/move money, pay a credit card, or fund a pension via sb1. Handles the confirmation flow safely.
+description: Move money with the `sb1` CLI (SpareBank 1), transfer between the user's own accounts, pay a credit card, or pay into a pension policy. Use when a user explicitly asks to transfer/move money, pay a credit card, or fund a pension via sb1. Handles the confirmation flow safely.
 compatibility: Requires the `sb1` binary, installed and authenticated (see sparebank1-shared). Executes real, irreversible payments.
 ---
 
@@ -17,7 +17,7 @@ Money-movement workflows for SpareBank 1 via `sb1`. Read
    amount and destination in this conversation. Prefer letting the CLI's own
    confirmation prompt show, and surface its summary to the user.
 2. Confirm `from`, `to`, and `amount` against `sb1 accounts` before running.
-3. `debit` transfers are **own-account only** — both `--from` and `--to` must be
+3. `debit` transfers are **own-account only**, both `--from` and `--to` must be
    the user's own accounts (the CLI rejects external destinations by design).
 4. If anything is ambiguous (which account, how much), stop and ask. Do not guess.
 

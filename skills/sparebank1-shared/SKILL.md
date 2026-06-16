@@ -6,7 +6,7 @@ compatibility: Requires the `sb1` binary installed and a registered SpareBank 1 
 
 # sparebank1-shared
 
-Foundation skill for the `sb1` CLI — a client for the
+Foundation skill for the `sb1` CLI, a client for the
 [SpareBank 1 personal banking API](https://developer.sparebank1.no). Read this
 before using any other `sparebank1` skill.
 
@@ -24,7 +24,7 @@ One-time setup the user must do themselves (requires their BankID):
 1. Register a **personal client** app at https://developer.sparebank1.no
 2. Set its redirect URI to exactly `http://localhost:12345/callback`
 3. Put `CLIENT_ID` / `CLIENT_SECRET` in a `.env` (git-ignored) or env vars
-4. `sb1 login` — opens the browser for BankID, stores the token
+4. `sb1 login`, opens the browser for BankID, stores the token
 
 Do not run `sb1 login` on the user's behalf without asking; it triggers an
 interactive BankID flow.
@@ -42,7 +42,7 @@ sessions. Secrets live in one of three backends, chosen by `SB1_STORE`:
 
 | `SB1_STORE` | Where |
 |---|---|
-| _unset_ / `file` | `~/.config/sparebank1-cli/*.json` (0600) — default |
+| _unset_ / `file` | `~/.config/sparebank1-cli/*.json` (0600), default |
 | `keychain` | macOS Keychain / Secret Service |
 | `op` / `1password` | 1Password via the `op` CLI (`SB1_OP_VAULT`, `SB1_OP_ACCOUNT`) |
 
@@ -53,7 +53,7 @@ in the developer portal). Do not retry in a loop.
 ## Output & flags
 
 - Default output is human-readable tables (Norwegian amounts: `kr 1 234,56`).
-- Add `--json` to **any** command for machine-readable output — always use this
+- Add `--json` to **any** command for machine-readable output, always use this
   when parsing programmatically.
 - Errors print to stderr with a non-zero exit code.
 
@@ -71,7 +71,7 @@ in the developer portal). Do not retry in a loop.
 | `transfer debit\|creditcard\|pension` | move money | sparebank1-transfers |
 
 `<ref>` for an account accepts its **name** ("Brukskonto"), **key**, or
-**number** — the CLI resolves it. Verify with `sb1 accounts` first when unsure.
+**number**, the CLI resolves it. Verify with `sb1 accounts` first when unsure.
 
 ## Etiquette (API terms)
 

@@ -58,7 +58,7 @@ pub fn login(args: LoginArgs) -> anyhow::Result<()> {
     }
 
     // Persist credentials unless told not to. Per terms §4.1 they are
-    // confidential — kept in the chosen secret store, never committed.
+    // confidential, kept in the chosen secret store, never committed.
     if !args.no_save_credentials {
         secrets::save_credentials(&creds).context("saving credentials")?;
     }
@@ -72,7 +72,7 @@ pub fn login(args: LoginArgs) -> anyhow::Result<()> {
     println!("✅ Logged in. Access token valid until {expiry}.");
     if !args.no_save_credentials {
         println!(
-            "   Credentials stored via {} — you can delete .env now.",
+            "   Credentials stored via {}, you can delete .env now.",
             secrets::backend_name()
         );
     }

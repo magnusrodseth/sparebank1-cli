@@ -1,7 +1,7 @@
 //! Output rendering: pretty tables (default), JSON, and CSV.
 //!
 //! Tables use Norwegian amount formatting (`kr 1 234,56`). JSON is emitted with
-//! `--json` for scripting. Money is never rounded for JSON output — only the
+//! `--json` for scripting. Money is never rounded for JSON output, only the
 //! table view applies locale formatting.
 
 use comfy_table::{Cell, CellAlignment, ContentArrangement, Table};

@@ -1,4 +1,4 @@
-# Secrets — NEVER commit. Per SpareBank 1 API terms §4.1/§5.2 credentials are
+# Secrets, NEVER commit. Per SpareBank 1 API terms §4.1/§5.2 credentials are
 # personal and must stay confidential.
 .env
 .env.*

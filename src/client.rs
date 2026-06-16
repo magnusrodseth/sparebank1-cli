@@ -63,7 +63,7 @@ impl ApiClient {
 
     // ---- common ---------------------------------------------------------
 
-    /// `GET /common/helloworld` — verifies authentication end to end.
+    /// `GET /common/helloworld`, verifies authentication end to end.
     pub fn hello(&self) -> Result<String> {
         let resp = self.get(HELLOWORLD).send()?;
         let resp = check(resp)?;
@@ -109,7 +109,7 @@ impl ApiClient {
         Ok(resp.json()?)
     }
 
-    /// `GET /accounts/{accountKey}/details` — raw JSON (loose schema).
+    /// `GET /accounts/{accountKey}/details`, raw JSON (loose schema).
     pub fn account_details(&self, key: &str) -> Result<serde_json::Value> {
         let resp = check(self.get(&format!("{BASE}/accounts/{key}/details")).send()?)?;
         Ok(resp.json()?)
@@ -121,7 +121,7 @@ impl ApiClient {
         Ok(resp.json()?)
     }
 
-    /// `POST /accounts/balance` — balance by account number.
+    /// `POST /accounts/balance`, balance by account number.
     pub fn balance(&self, account_number: &str) -> Result<Balance> {
         let body = serde_json::json!({ "accountNumber": account_number });
         let resp = check(
@@ -173,7 +173,7 @@ impl ApiClient {
         Ok(resp.json()?)
     }
 
-    /// `GET /transactions/export` — server-rendered CSV of booked transactions.
+    /// `GET /transactions/export`, server-rendered CSV of booked transactions.
     pub fn transactions_export(
         &self,
         account_key: &str,
@@ -204,7 +204,7 @@ impl ApiClient {
 
     // ---- transfers ------------------------------------------------------
 
-    /// `POST /transfer/debit` — domestic/own-account payment.
+    /// `POST /transfer/debit`, domestic/own-account payment.
     pub fn transfer_debit(&self, req: &DebitTransferRequest) -> Result<TransferResponse> {
         let resp = check(
             self.post_json(&format!("{BASE}/transfer/debit"), req)

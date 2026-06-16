@@ -1,11 +1,15 @@
-# sb1 — SpareBank 1 CLI
+# sb1
 
-A feature-complete command-line client for the [SpareBank 1 personal banking
-API](https://developer.sparebank1.no): list accounts, browse and export
-transactions, and make transfers — authenticated with BankID over OAuth 2.0.
+CLI for the [SpareBank 1 personal banking API](https://developer.sparebank1.no).
+Designed for AI agent consumption.
+
+List accounts, browse and export transactions, and make transfers, all
+authenticated with BankID over OAuth 2.0. Output is human-readable tables by
+default and machine-readable JSON with `--json`. Ships [agent skills](skills/) so
+AI agents can drive it safely.
 
 Written in Rust. Personal and unofficial; not affiliated with SpareBank 1.
-Please read [TERMS.md](TERMS.md) — usage of the underlying API is governed by the
+Please read [TERMS.md](TERMS.md): usage of the underlying API is governed by the
 bank's terms (personal use, confidential credentials, enforced rate limits).
 
 ## Install
@@ -58,7 +62,7 @@ Example (per-machine preference):
 # Keychain
 export SB1_STORE=keychain
 
-# 1Password — no machine-password prompt; uses your 1Password unlock (Touch ID)
+# 1Password, no machine-password prompt; uses your 1Password unlock (Touch ID)
 export SB1_STORE=op
 export SB1_OP_ACCOUNT=my.1password.eu   # only needed with multiple op accounts
 export SB1_OP_VAULT=Private             # default
@@ -133,9 +137,9 @@ The OpenAPI specs this client was built against are saved under
 This repo ships [agent skills](https://skills.sh) under [`skills/`](skills/) that
 teach an AI agent how to drive `sb1` safely:
 
-- `sparebank1-shared` — runtime contract: auth, storage, output, command map
-- `sparebank1-accounts` — read accounts, balances, transactions, exports
-- `sparebank1-transfers` — money movement with confirmation safeguards
+- `sparebank1-shared`: runtime contract (auth, storage, output, command map)
+- `sparebank1-accounts`: read accounts, balances, transactions, exports
+- `sparebank1-transfers`: money movement with confirmation safeguards
 
 Install them into your agent:
 

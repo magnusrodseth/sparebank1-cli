@@ -99,7 +99,7 @@ pub fn login(creds: &ClientCredentials) -> Result<StoredToken> {
     let (code, returned_state) = wait_for_callback(&listener, &path)?;
     if returned_state.as_deref() != Some(state.as_str()) {
         return Err(Sb1Error::AuthFlow(
-            "state mismatch — possible CSRF, aborting".into(),
+            "state mismatch, possible CSRF, aborting".into(),
         ));
     }
     let code = code.ok_or_else(|| Sb1Error::AuthFlow("no authorization code received".into()))?;
@@ -111,7 +111,7 @@ pub fn login(creds: &ClientCredentials) -> Result<StoredToken> {
 
 /// Return a valid access token, refreshing or erroring as needed.
 ///
-/// Never triggers an interactive login on its own — that is reserved for the
+/// Never triggers an interactive login on its own, that is reserved for the
 /// explicit `login` command so non-interactive use fails loudly.
 pub fn valid_access_token() -> Result<String> {
     let token = secrets::load_token()?.ok_or(Sb1Error::NotAuthenticated)?;
@@ -144,7 +144,7 @@ pub fn force_refresh() -> Result<StoredToken> {
 
 fn build_authorize_url(creds: &ClientCredentials, state: &str) -> Result<Url> {
     let mut url = Url::parse(AUTH_URL).map_err(|e| Sb1Error::AuthFlow(e.to_string()))?;
-    // NB: no `finInst` hint — the authorize page lets the user pick their bank.
+    // NB: no `finInst` hint, the authorize page lets the user pick their bank.
     // Hardcoding the wrong institution causes `access_denied`.
     url.query_pairs_mut()
         .append_pair("client_id", &creds.client_id)

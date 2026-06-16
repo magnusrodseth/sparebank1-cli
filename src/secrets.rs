@@ -154,7 +154,7 @@ fn op_run(args: &[&str]) -> Result<std::process::Output> {
     }
     cmd.args(args).output().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
-            op_err("CLI not found — install it from https://developer.1password.com/docs/cli/")
+            op_err("CLI not found, install it from https://developer.1password.com/docs/cli/")
         } else {
             op_err(e)
         }
@@ -171,7 +171,7 @@ fn op_read(account: &str) -> Result<Option<String>> {
         return Ok(Some(String::from_utf8_lossy(&out.stdout).to_string()));
     }
     let stderr = String::from_utf8_lossy(&out.stderr);
-    // A missing item is not an error — it just means "not stored yet".
+    // A missing item is not an error, it just means "not stored yet".
     if stderr.contains("isn't an item")
         || stderr.contains("not found")
         || stderr.contains("doesn't exist")
