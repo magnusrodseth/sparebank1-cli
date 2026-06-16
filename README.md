@@ -31,7 +31,7 @@ required. The agent chains the commands and reasons over the JSON:
 - "Where did my money go last month?"
 - "What subscriptions am I paying for?"
 - "Did my paycheck arrive?"
-- "Help me optimize my finances: where do I sløse, what can I improve, and where am I inconsistent?"
+- "Help me optimize my finances: where am I wasting money, what can I cut, and where is my spending inconsistent?"
 
 ```bash
 sb1 --json summary
