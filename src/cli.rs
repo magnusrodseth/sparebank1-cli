@@ -264,3 +264,46 @@ pub struct PensionArgs {
     #[arg(long, short = 'y')]
     pub yes: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(positional: &[&str], flags: &[&str]) -> TxnArgs {
+        TxnArgs {
+            positional_accounts: positional.iter().map(|s| s.to_string()).collect(),
+            flag_accounts: flags.iter().map(|s| s.to_string()).collect(),
+            from: None,
+            to: None,
+            days: None,
+            limit: None,
+            source: None,
+            classified: false,
+            csv: false,
+            output: None,
+        }
+    }
+
+    #[test]
+    fn account_refs_empty_when_none_given() {
+        assert!(args(&[], &[]).account_refs().is_empty());
+    }
+
+    #[test]
+    fn account_refs_returns_positional_only() {
+        assert_eq!(args(&["Brukskonto"], &[]).account_refs(), ["Brukskonto"]);
+    }
+
+    #[test]
+    fn account_refs_returns_flags_only() {
+        assert_eq!(args(&[], &["Sparekonto"]).account_refs(), ["Sparekonto"]);
+    }
+
+    #[test]
+    fn account_refs_combines_positional_before_flags() {
+        assert_eq!(
+            args(&["Brukskonto"], &["Sparekonto"]).account_refs(),
+            ["Brukskonto", "Sparekonto"]
+        );
+    }
+}

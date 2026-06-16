@@ -300,3 +300,76 @@ fn redact(s: &str) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn into_stored_applies_expiry_margin() {
+        let before = crate::util::now_unix();
+        let st = TokenResponse {
+            access_token: "a".into(),
+            refresh_token: Some("r".into()),
+            token_type: "Bearer".into(),
+            expires_in: Some(3600),
+        }
+        .into_stored();
+        let after = crate::util::now_unix();
+        // expires_at = now + expires_in - EXPIRY_MARGIN (60).
+        assert!(st.expires_at >= before + 3600 - EXPIRY_MARGIN);
+        assert!(st.expires_at <= after + 3600 - EXPIRY_MARGIN);
+        assert_eq!(st.refresh_token.as_deref(), Some("r"));
+    }
+
+    #[test]
+    fn into_stored_defaults_missing_expiry_to_one_hour() {
+        let before = crate::util::now_unix();
+        let st = TokenResponse {
+            access_token: "a".into(),
+            refresh_token: None,
+            token_type: "Bearer".into(),
+            expires_in: None,
+        }
+        .into_stored();
+        assert!(st.expires_at >= before + 3600 - EXPIRY_MARGIN);
+    }
+
+    #[test]
+    fn redact_masks_token_like_text() {
+        assert_eq!(
+            redact("{\"access_token\":\"abc\"}"),
+            "<redacted: response contained access_token>"
+        );
+        // Innocuous text is left intact.
+        assert_eq!(redact("some plain error"), "some plain error");
+    }
+
+    #[test]
+    fn random_state_is_32_hex_chars_and_varies() {
+        let a = random_state();
+        let b = random_state();
+        assert_eq!(a.len(), 32);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn authorize_url_has_required_params_and_no_fininst() {
+        let creds = ClientCredentials {
+            client_id: "my-client".into(),
+            client_secret: "shh".into(),
+            redirect_uri: "http://localhost:12345/callback".into(),
+        };
+        let url = build_authorize_url(&creds, "STATE123").unwrap();
+        let s = url.as_str();
+        assert!(s.contains("client_id=my-client"));
+        assert!(s.contains("response_type=code"));
+        assert!(s.contains("state=STATE123"));
+        assert!(s.contains("scope="));
+        // Regression guard: a hardcoded finInst hint causes access_denied.
+        assert!(!s.contains("finInst"));
+        // The client secret must never appear in the authorize URL.
+        assert!(!s.contains("shh"));
+    }
+}

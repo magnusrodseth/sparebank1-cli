@@ -328,3 +328,139 @@ impl ApiErrorBody {
             .join("; ")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn from_json<T: serde::de::DeserializeOwned>(v: serde_json::Value) -> T {
+        serde_json::from_value(v).unwrap()
+    }
+
+    // ---- Account --------------------------------------------------------
+
+    #[test]
+    fn display_balance_prefers_available_then_balance() {
+        let a: Account = from_json(serde_json::json!({"balance": 100.0, "availableBalance": 80.0}));
+        assert_eq!(a.display_balance(), 80.0);
+        let b: Account = from_json(serde_json::json!({"balance": 100.0}));
+        assert_eq!(b.display_balance(), 100.0);
+        let c: Account = from_json(serde_json::json!({}));
+        assert_eq!(c.display_balance(), 0.0);
+    }
+
+    #[test]
+    fn currency_defaults_to_nok() {
+        let a: Account = from_json(serde_json::json!({}));
+        assert_eq!(a.currency(), "NOK");
+        let b: Account = from_json(serde_json::json!({"currencyCode": "USD"}));
+        assert_eq!(b.currency(), "USD");
+    }
+
+    #[test]
+    fn number_is_formatted_norwegian_style_for_11_digits() {
+        let a: Account = from_json(serde_json::json!({"accountNumber": "20853454096"}));
+        assert_eq!(a.number(), "2085.34.54096");
+    }
+
+    #[test]
+    fn number_returns_raw_when_not_eleven_digits() {
+        let a: Account = from_json(serde_json::json!({"accountNumber": "1234"}));
+        assert_eq!(a.number(), "1234");
+    }
+
+    #[test]
+    fn number_raw_strips_non_digits() {
+        let a: Account = from_json(serde_json::json!({"accountNumber": "2085.34.54096"}));
+        assert_eq!(a.number_raw(), "20853454096");
+    }
+
+    // ---- Transaction ----------------------------------------------------
+
+    #[test]
+    fn date_str_is_empty_without_a_date() {
+        let t: Transaction = from_json(serde_json::json!({}));
+        assert_eq!(t.date_str(), "");
+    }
+
+    #[test]
+    fn best_description_prefers_cleaned_then_falls_back_and_trims() {
+        let cleaned: Transaction =
+            from_json(serde_json::json!({"description": "RAW", "cleanedDescription": "  Clean  "}));
+        assert_eq!(cleaned.best_description(), "Clean");
+        // Blank cleaned description falls back to the raw description.
+        let blank: Transaction =
+            from_json(serde_json::json!({"description": "Raw", "cleanedDescription": "   "}));
+        assert_eq!(blank.best_description(), "Raw");
+    }
+
+    #[test]
+    fn amount_value_defaults_to_zero() {
+        let t: Transaction = from_json(serde_json::json!({}));
+        assert_eq!(t.amount_value(), 0.0);
+    }
+
+    // ---- ClassifiedItem -------------------------------------------------
+
+    #[test]
+    fn classified_item_picks_localised_category_and_sets_flags() {
+        let item: ClassifiedItem = from_json(serde_json::json!({
+            "transaction": {"amount": -50.0},
+            "categories": [{"main": "GROCERIES", "mainI18n": "Dagligvarer"}],
+            "recurring": true,
+            "subscription": false,
+        }));
+        let t = item.into_transaction();
+        assert_eq!(t.category.as_deref(), Some("Dagligvarer"));
+        assert_eq!(t.recurring, Some(true));
+        assert_eq!(t.subscription, Some(false));
+    }
+
+    #[test]
+    fn classified_item_drops_uncategorised_label() {
+        let item: ClassifiedItem = from_json(serde_json::json!({
+            "transaction": {},
+            "categories": [{"mainI18n": "Ukategorisert"}],
+        }));
+        assert_eq!(item.into_transaction().category, None);
+    }
+
+    // ---- ApiErrorBody ---------------------------------------------------
+
+    #[test]
+    fn human_reports_unknown_for_empty_errors() {
+        let b = ApiErrorBody { errors: vec![] };
+        assert_eq!(b.human(), "unknown error");
+    }
+
+    #[test]
+    fn human_formats_code_and_message() {
+        let b = ApiErrorBody {
+            errors: vec![ApiErrorItem {
+                code: Some("INSUFFICIENT_FUNDS".into()),
+                message: Some("Not enough money".into()),
+                detail: None,
+            }],
+        };
+        assert_eq!(b.human(), "[INSUFFICIENT_FUNDS] Not enough money");
+    }
+
+    #[test]
+    fn human_falls_back_to_detail_and_joins_multiple() {
+        let b = ApiErrorBody {
+            errors: vec![
+                ApiErrorItem {
+                    code: None,
+                    message: None,
+                    detail: Some("just a detail".into()),
+                },
+                ApiErrorItem {
+                    code: Some("E2".into()),
+                    message: None,
+                    detail: None,
+                },
+            ],
+        };
+        assert_eq!(b.human(), "just a detail; [E2]");
+    }
+}

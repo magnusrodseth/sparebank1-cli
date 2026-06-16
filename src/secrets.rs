@@ -418,3 +418,78 @@ fn parse_dotenv(contents: &str) -> Vec<(String, String)> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dotenv_parses_pairs_comments_and_quotes() {
+        let env = "# a comment\n\
+                   CLIENT_ID=abc123\n\
+                   \n\
+                   export CLIENT_SECRET=\"secret value\"\n\
+                   REDIRECT_URL='http://localhost:12345/callback'\n";
+        let pairs = parse_dotenv(env);
+        let get = |k: &str| {
+            pairs
+                .iter()
+                .find(|(key, _)| key == k)
+                .map(|(_, v)| v.as_str())
+        };
+        assert_eq!(get("CLIENT_ID"), Some("abc123"));
+        // `export ` prefix stripped, double quotes removed.
+        assert_eq!(get("CLIENT_SECRET"), Some("secret value"));
+        // single quotes removed.
+        assert_eq!(get("REDIRECT_URL"), Some("http://localhost:12345/callback"));
+        // comment and blank line produced no entries.
+        assert_eq!(pairs.len(), 3);
+    }
+
+    #[test]
+    fn op_title_maps_logical_accounts() {
+        assert_eq!(op_title(ACCT_TOKEN), "SpareBank1 CLI token");
+        assert_eq!(op_title(ACCT_CREDENTIALS), "SpareBank1 CLI credentials");
+        assert_eq!(op_title("other"), "SpareBank1 CLI other");
+    }
+
+    #[test]
+    fn stored_token_validity_tracks_expiry() {
+        let valid = StoredToken {
+            access_token: "a".into(),
+            refresh_token: None,
+            token_type: "Bearer".into(),
+            expires_at: crate::util::now_unix() + 100,
+        };
+        assert!(valid.is_valid());
+        let expired = StoredToken {
+            expires_at: crate::util::now_unix() - 100,
+            ..valid
+        };
+        assert!(!expired.is_valid());
+    }
+
+    #[test]
+    fn default_redirect_is_loopback_callback() {
+        assert_eq!(default_redirect(), "http://localhost:12345/callback");
+    }
+
+    // All assertions that mutate the process-global SB1_STORE live in this one
+    // test so they run sequentially; no other test reads that variable.
+    #[test]
+    fn backend_is_selected_by_env_with_keychain_default() {
+        std::env::set_var("SB1_STORE", "keychain");
+        assert_eq!(backend(), Backend::Keychain);
+        std::env::set_var("SB1_STORE", "op");
+        assert_eq!(backend(), Backend::OnePassword);
+        std::env::set_var("SB1_STORE", "1password");
+        assert_eq!(backend(), Backend::OnePassword);
+        std::env::set_var("SB1_STORE", "file");
+        assert_eq!(backend(), Backend::File);
+        // Unknown and unset both fall back to the secure keychain default.
+        std::env::set_var("SB1_STORE", "bogus");
+        assert_eq!(backend(), Backend::Keychain);
+        std::env::remove_var("SB1_STORE");
+        assert_eq!(backend(), Backend::Keychain);
+    }
+}

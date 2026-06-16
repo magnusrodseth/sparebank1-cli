@@ -80,4 +80,38 @@ mod tests {
         assert_eq!(format_kr(-1234.56), "-kr 1 234,56");
         assert_eq!(format_kr(100.0), "kr 100,00");
     }
+
+    #[test]
+    fn groups_thousands_at_boundaries() {
+        assert_eq!(format_kr(1000.0), "kr 1 000,00");
+        assert_eq!(format_kr(10000.0), "kr 10 000,00");
+    }
+
+    #[test]
+    fn rounds_to_two_decimals() {
+        assert_eq!(format_kr(1.999), "kr 2,00");
+        assert_eq!(format_kr(0.994), "kr 0,99");
+    }
+
+    #[test]
+    fn negative_zero_has_no_minus_sign() {
+        assert_eq!(format_kr(-0.0), "kr 0,00");
+    }
+
+    #[test]
+    fn ms_epoch_converts_to_local_date() {
+        // 2021-06-15 12:00:00 UTC. Noon UTC keeps the same calendar date across
+        // every plausible local timezone, so this is deterministic in CI.
+        assert_eq!(ms_epoch_to_date(1_623_758_400_000), "2021-06-15");
+    }
+
+    #[test]
+    fn ms_epoch_is_empty_for_unrepresentable() {
+        assert_eq!(ms_epoch_to_date(i64::MAX), "");
+    }
+
+    #[test]
+    fn days_ago_zero_is_today() {
+        assert_eq!(days_ago(0), today());
+    }
 }

@@ -179,3 +179,46 @@ fn report(resp: &TransferResponse, mode: OutputMode) -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_amount;
+
+    #[test]
+    fn accepts_plain_integer() {
+        assert_eq!(normalize_amount("250").unwrap(), "250.00");
+    }
+
+    #[test]
+    fn accepts_dot_decimal() {
+        assert_eq!(normalize_amount("250.50").unwrap(), "250.50");
+    }
+
+    #[test]
+    fn accepts_norwegian_comma_decimal() {
+        assert_eq!(normalize_amount("250,50").unwrap(), "250.50");
+    }
+
+    #[test]
+    fn strips_whitespace_including_thousands_spaces() {
+        assert_eq!(normalize_amount(" 1 234,5 ").unwrap(), "1234.50");
+    }
+
+    #[test]
+    fn rejects_zero() {
+        let err = normalize_amount("0").unwrap_err();
+        assert!(err.to_string().contains("positive"));
+    }
+
+    #[test]
+    fn rejects_negative() {
+        let err = normalize_amount("-5").unwrap_err();
+        assert!(err.to_string().contains("positive"));
+    }
+
+    #[test]
+    fn rejects_non_numeric() {
+        let err = normalize_amount("abc").unwrap_err();
+        assert!(err.to_string().contains("invalid amount"));
+    }
+}

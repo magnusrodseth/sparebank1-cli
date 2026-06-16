@@ -166,3 +166,47 @@ fn csv_escape(s: &str) -> String {
         s.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HEADER: &str =
+        "id,date,description,amount,currency,status,type_code,counterparty,account\n";
+
+    fn txn(v: serde_json::Value) -> Transaction {
+        serde_json::from_value(v).unwrap()
+    }
+
+    #[test]
+    fn empty_input_yields_header_only() {
+        assert_eq!(transactions_csv(&[]), HEADER);
+    }
+
+    #[test]
+    fn formats_amount_and_falls_back_to_counterparty_number() {
+        let csv = transactions_csv(&[txn(serde_json::json!({
+            "id": "t1",
+            "amount": -50.0,
+            "description": "Coffee",
+            "currencyCode": "NOK",
+            "bookingStatus": "BOOKED",
+            "remoteAccountNumber": "12345678903",
+        }))]);
+        let row = csv.strip_prefix(HEADER).unwrap();
+        // amount rendered with two decimals; counterparty falls back to number.
+        assert_eq!(row.trim_end(), "t1,,Coffee,-50.00,NOK,BOOKED,,12345678903,");
+    }
+
+    #[test]
+    fn escapes_commas_by_quoting() {
+        let csv = transactions_csv(&[txn(serde_json::json!({"description": "Rema 1000, Oslo"}))]);
+        assert!(csv.contains("\"Rema 1000, Oslo\""));
+    }
+
+    #[test]
+    fn escapes_embedded_quotes_by_doubling() {
+        let csv = transactions_csv(&[txn(serde_json::json!({"description": "The \"Big\" Shop"}))]);
+        assert!(csv.contains("\"The \"\"Big\"\" Shop\""));
+    }
+}

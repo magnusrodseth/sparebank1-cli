@@ -42,6 +42,16 @@ pub fn resolve_account(client: &ApiClient, input: &str) -> anyhow::Result<Accoun
         include_currency: true,
     };
     let accounts = client.accounts(&opts)?;
+    resolve_account_ref(&accounts, input)
+}
+
+/// Pure matcher behind [`resolve_account`]: resolve a user-supplied reference
+/// against an already-fetched account list. Kept separate from the network fetch
+/// so the matching rules can be unit-tested.
+///
+/// Matching order: exact key → exact account number (digits) → exact name (ci)
+/// → unique partial name (ci). Ambiguous or missing references are hard errors.
+pub fn resolve_account_ref(accounts: &[Account], input: &str) -> anyhow::Result<Account> {
     let digits = |s: &str| s.chars().filter(|c| c.is_ascii_digit()).collect::<String>();
     let target_digits = digits(input);
     let lower = input.to_lowercase();
@@ -101,5 +111,74 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Export(args) => transactions::export(args),
         Command::Transfer { kind } => transfer::run(kind, mode),
         Command::Summary { months } => summary::run(months, mode),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn acct(key: &str, name: &str, number: &str) -> Account {
+        serde_json::from_value(serde_json::json!({
+            "key": key,
+            "name": name,
+            "accountNumber": number,
+        }))
+        .unwrap()
+    }
+
+    fn sample() -> Vec<Account> {
+        vec![
+            acct("KEY_BRUKS", "Brukskonto", "20853454096"),
+            acct("KEY_SPARE", "Sparekonto", "20853454126"),
+            acct("KEY_BUFFER", "Bufferkonto", "20853454134"),
+        ]
+    }
+
+    #[test]
+    fn resolves_by_exact_key() {
+        let a = resolve_account_ref(&sample(), "KEY_SPARE").unwrap();
+        assert_eq!(a.name, "Sparekonto");
+    }
+
+    #[test]
+    fn resolves_by_account_number_ignoring_formatting() {
+        // Dotted Norwegian display form must match the bare stored digits.
+        let a = resolve_account_ref(&sample(), "2085.34.54096").unwrap();
+        assert_eq!(a.key, "KEY_BRUKS");
+    }
+
+    #[test]
+    fn resolves_by_exact_name_case_insensitive() {
+        let a = resolve_account_ref(&sample(), "brukskonto").unwrap();
+        assert_eq!(a.key, "KEY_BRUKS");
+    }
+
+    #[test]
+    fn resolves_by_unique_partial_name() {
+        let a = resolve_account_ref(&sample(), "buffer").unwrap();
+        assert_eq!(a.key, "KEY_BUFFER");
+    }
+
+    #[test]
+    fn ambiguous_partial_name_is_an_error() {
+        // "konto" matches all three.
+        let err = resolve_account_ref(&sample(), "konto").unwrap_err();
+        assert!(err.to_string().contains("ambiguous"));
+    }
+
+    #[test]
+    fn unknown_reference_is_an_error() {
+        let err = resolve_account_ref(&sample(), "nonexistent").unwrap_err();
+        assert!(err.to_string().contains("no account matches"));
+    }
+
+    #[test]
+    fn exact_key_wins_over_partial_name() {
+        // A reference that is an exact key should not be treated as a name search.
+        let accounts = vec![acct("Sparekonto", "Brukskonto", "20853454096")];
+        let a = resolve_account_ref(&accounts, "Sparekonto").unwrap();
+        // Matched the key, so the resolved account's name is Brukskonto.
+        assert_eq!(a.name, "Brukskonto");
     }
 }
