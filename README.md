@@ -1,11 +1,12 @@
-# sb1
+# SpareBank 1 CLI
 
 <p align="center">
   <img src="docs/banner.png" alt="A person at a laptop and an AI agent managing money together, with a piggy bank and kroner coins" width="640">
 </p>
 
-CLI for the [SpareBank 1 personal banking API](https://developer.sparebank1.no).
-Designed for AI agent consumption.
+**Your finances, agent-ready.** `sb1` is a CLI for the
+[SpareBank 1 personal banking API](https://developer.sparebank1.no), built for
+AI agents (and humans).
 
 List accounts, browse and export transactions, and make transfers, all
 authenticated with BankID over OAuth 2.0. Output is human-readable tables by
