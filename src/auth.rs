@@ -184,9 +184,14 @@ fn post_token(params: &[(&str, &str)]) -> Result<StoredToken> {
         let body: TokenResponse = resp.json()?;
         return Ok(body.into_stored());
     }
-    // Map invalid_client / invalid_grant to the rotate-your-secret hint.
+    // Distinguish the two OAuth failure modes so the user gets the right fix:
+    //   invalid_grant  -> stored login/refresh token expired -> `sb1 login`
+    //   invalid_client -> client secret rejected/expired      -> rotate secret
     let text = resp.text().unwrap_or_default();
-    if status.as_u16() == 401 || text.contains("invalid_client") || text.contains("invalid_grant") {
+    if text.contains("invalid_grant") {
+        return Err(Sb1Error::SessionExpired);
+    }
+    if status.as_u16() == 401 || text.contains("invalid_client") {
         return Err(Sb1Error::InvalidClientCredentials);
     }
     Err(Sb1Error::Api {

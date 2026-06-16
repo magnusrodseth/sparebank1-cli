@@ -141,6 +141,14 @@ pub struct Transaction {
     pub merchant: Option<Merchant>,
     #[serde(default)]
     pub source: Option<String>,
+
+    // Populated only from the classified endpoint (not in the plain DTO).
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub recurring: Option<bool>,
+    #[serde(default)]
+    pub subscription: Option<bool>,
 }
 
 impl Transaction {
@@ -180,6 +188,56 @@ pub struct Merchant {
 
 /// Account balance response (`POST /accounts/balance`). Loose schema.
 pub type Balance = serde_json::Value;
+
+/// Response envelope for `GET /transactions/classified`. Each item wraps a
+/// transaction with the bank's own classification (category, recurring,
+/// subscription) instead of the flat shape used by `/transactions`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClassifiedResponse {
+    #[serde(default)]
+    pub transactions: Vec<ClassifiedItem>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClassifiedItem {
+    pub transaction: Transaction,
+    #[serde(default)]
+    pub categories: Vec<Category>,
+    #[serde(default)]
+    pub recurring: bool,
+    #[serde(default)]
+    pub subscription: bool,
+}
+
+/// A bank-assigned category (localised). `main_i18n` is the display label.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Category {
+    #[serde(default)]
+    pub main: Option<String>,
+    #[serde(default)]
+    pub main_i18n: Option<String>,
+    #[serde(default)]
+    pub sub_i18n: Option<String>,
+}
+
+impl ClassifiedItem {
+    /// Flatten into a [`Transaction`] enriched with category/recurring/subscription.
+    pub fn into_transaction(self) -> Transaction {
+        let category = self
+            .categories
+            .into_iter()
+            .find_map(|c| c.main_i18n.or(c.main))
+            .filter(|c| !c.is_empty() && c.to_lowercase() != "ukategorisert");
+        let mut t = self.transaction;
+        t.category = category;
+        t.recurring = Some(self.recurring);
+        t.subscription = Some(self.subscription);
+        t
+    }
+}
 
 /// Request body for `POST /transfer/debit` (own-account / domestic payment).
 #[derive(Debug, Serialize)]

@@ -14,15 +14,22 @@ pub enum Sb1Error {
     #[error("not logged in, run `sb1 login` first")]
     NotAuthenticated,
 
-    /// The client secret was rejected. Per terms §3 the secret has limited
-    /// validity, so this most often means it has expired and must be rotated.
+    /// The client secret was rejected (`invalid_client`). Per terms §3 the
+    /// secret has limited validity, so this most often means it has expired and
+    /// must be rotated.
     #[error(
-        "client credentials were rejected by SpareBank 1.\n\
+        "client credentials were rejected by SpareBank 1 (invalid_client).\n\
          The client secret has limited validity (terms §3); it has most likely \
          expired.\n\
          Rotate it at https://developer.sparebank1.no and run `sb1 login` again."
     )]
     InvalidClientCredentials,
+
+    /// The stored login expired (`invalid_grant`): the refresh token is no
+    /// longer valid (used, revoked, or aged out). Distinct from a bad client
+    /// secret — the fix is to log in again, not to rotate the secret.
+    #[error("your saved login has expired (invalid_grant). Run `sb1 login` again.")]
+    SessionExpired,
 
     /// The API enforced a rate limit (HTTP 429). We do not circumvent limits
     /// (terms §6); the caller should back off and try again later.

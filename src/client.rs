@@ -133,7 +133,10 @@ impl ApiClient {
 
     // ---- transactions ---------------------------------------------------
 
-    /// `GET /transactions` (or `/transactions/classified`).
+    /// `GET /transactions`, or `/transactions/classified` when `opts.classified`
+    /// is set. The classified endpoint returns a different envelope (each row is
+    /// wrapped with the bank's category/recurring/subscription); we flatten it
+    /// back into [`TransactionsResponse`] with those fields populated.
     pub fn transactions(&self, opts: &TxnQuery) -> Result<TransactionsResponse> {
         let path = if opts.classified {
             "transactions/classified"
@@ -159,7 +162,20 @@ impl ApiClient {
         }
         req = req.query(&q);
         let resp = check(req.send()?)?;
-        Ok(resp.json()?)
+
+        if opts.classified {
+            let body: ClassifiedResponse = resp.json()?;
+            Ok(TransactionsResponse {
+                transactions: body
+                    .transactions
+                    .into_iter()
+                    .map(ClassifiedItem::into_transaction)
+                    .collect(),
+                errors: Vec::new(),
+            })
+        } else {
+            Ok(resp.json()?)
+        }
     }
 
     /// `GET /transactions/{id}/details` (or `.../details/classified`).

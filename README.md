@@ -111,7 +111,16 @@ sb1 transfer pension --from Brukskonto --policy-number 1034222 --amount 500
 
 # Machine-readable output
 sb1 --json accounts
+
+# Financial overview: net worth, monthly cash flow, categories, subscriptions
+sb1 summary --months 6
+sb1 --json summary
 ```
+
+`--classified` enriches transactions with the bank's own category, recurring,
+and subscription flags. `summary` builds on the same classification, so its
+categories work for any account setup (no hardcoded merchants); internal
+transfers between your own accounts are excluded automatically.
 
 `debit` transfers are restricted to **your own accounts**: both `--from` and
 `--to` must resolve to accounts in your account list. Amounts accept `250`,
@@ -132,6 +141,7 @@ sb1 --json accounts
 | `transfer debit` | `POST /transfer/debit` |
 | `transfer creditcard` | `POST /transfer/creditcard/transferTo` |
 | `transfer pension` | `POST /transfer/pension` |
+| `summary` | derived from `/accounts` + `/transactions/classified` |
 
 The OpenAPI specs this client was built against are saved under
 [`docs/api/`](docs/api/).

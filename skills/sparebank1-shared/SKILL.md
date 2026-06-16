@@ -69,6 +69,7 @@ in the developer portal). Do not retry in a loop.
 | `transaction <id>` | one transaction's details | sparebank1-accounts |
 | `export ...` | server-side CSV export | sparebank1-accounts |
 | `transfer debit\|creditcard\|pension` | move money | sparebank1-transfers |
+| `summary [--months N]` | net worth + cash flow + categories | sparebank1-accounts |
 
 `<ref>` for an account accepts its **name** ("Brukskonto"), **key**, or
 **number**, the CLI resolves it. Verify with `sb1 accounts` first when unsure.

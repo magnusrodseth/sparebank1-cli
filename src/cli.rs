@@ -71,6 +71,13 @@ pub enum Command {
         #[command(subcommand)]
         kind: TransferKind,
     },
+
+    /// Financial overview: net worth, monthly cash flow, categories, subscriptions.
+    Summary {
+        /// Number of months to analyse (default 3).
+        #[arg(long, default_value_t = 3)]
+        months: i64,
+    },
 }
 
 #[derive(Debug, Args)]

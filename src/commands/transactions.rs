@@ -133,5 +133,8 @@ fn txn_json(t: &crate::models::Transaction) -> serde_json::Value {
         "counterpartyName": t.remote_account_name,
         "counterpartyNumber": t.remote_account_number,
         "account": t.account_name,
+        "category": t.category,
+        "recurring": t.recurring,
+        "subscription": t.subscription,
     })
 }

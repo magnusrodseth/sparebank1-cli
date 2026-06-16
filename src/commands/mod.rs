@@ -2,6 +2,7 @@
 
 pub mod accounts;
 pub mod auth;
+pub mod summary;
 pub mod transactions;
 pub mod transfer;
 
@@ -99,5 +100,6 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Transaction { id, classified } => transactions::show(id, classified),
         Command::Export(args) => transactions::export(args),
         Command::Transfer { kind } => transfer::run(kind, mode),
+        Command::Summary { months } => summary::run(months, mode),
     }
 }

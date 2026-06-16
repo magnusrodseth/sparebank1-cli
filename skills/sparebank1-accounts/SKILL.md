@@ -62,12 +62,26 @@ sb1 export -a Brukskonto --from 2026-05-01 --to 2026-06-16 -o booked.csv
 Dato, Beskrivelse, Inn, Ut, …) for **booked** transactions. For programmatic
 analysis prefer `transactions --json` or `transactions --csv` instead.
 
-## Analysis pattern
+## Financial overview (preferred for "how are my finances")
 
-To answer "how much did I spend on X last month":
+```bash
+sb1 summary --months 6        # net worth, monthly cash flow, categories, subs
+sb1 --json summary --months 6 # machine-readable
+```
 
-1. `sb1 --json transactions -a <account> --from <start> --to <end>` (use `ALL`
-   source if you need older rows).
-2. Parse the JSON `transactions[]`: `amount` (negative = outgoing), `date`
-   (ISO), `description`, `counterpartyName`.
-3. Sum/group in your own logic. Never guess figures the API didn't return.
+`summary` is generalizable across any account setup: net worth per currency,
+income vs spending (internal transfers between the user's own accounts are
+excluded), monthly breakdown, spending by **bank-assigned category**, top
+counterparties, and bank-flagged subscriptions. Prefer this over hand-rolled
+analysis.
+
+## Manual analysis pattern
+
+For bespoke questions ("how much on X last month"):
+
+1. `sb1 --json transactions -a <account> --from <start> --to <end> --classified`
+   (add `--source ALL` for older rows). `--classified` adds `category`,
+   `recurring`, and `subscription` per transaction.
+2. Parse `transactions[]`: `amount` (negative = outgoing), `date` (ISO),
+   `description`, `counterpartyName`, `category`.
+3. Sum/group in your own logic. Never guess figures the API did not return.

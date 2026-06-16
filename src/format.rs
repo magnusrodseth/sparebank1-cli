@@ -88,11 +88,16 @@ pub fn transactions_table(txns: &[Transaction]) {
         .collect::<std::collections::HashSet<_>>()
         .len()
         > 1;
+    // Only present when the classified endpoint was used.
+    let has_category = txns.iter().any(|t| t.category.is_some());
 
     let mut table = base_table();
     let mut header = vec!["Date", "Description", "Amount", "Status", "Counterparty"];
     if multi_account {
         header.insert(1, "Account");
+    }
+    if has_category {
+        header.push("Category");
     }
     table.set_header(header);
 
@@ -111,6 +116,9 @@ pub fn transactions_table(txns: &[Transaction]) {
         row.push(Cell::new(format_kr(t.amount_value())).set_alignment(CellAlignment::Right));
         row.push(Cell::new(t.booking_status.clone().unwrap_or_default()));
         row.push(Cell::new(counterparty));
+        if has_category {
+            row.push(Cell::new(t.category.clone().unwrap_or_default()));
+        }
         table.add_row(row);
     }
     println!("{table}");
