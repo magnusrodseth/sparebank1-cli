@@ -1,6 +1,6 @@
 [package]
 name = "sparebank1-cli"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.80"
 description = "Feature-complete command-line client for the SpareBank 1 personal banking API (accounts, transactions, transfers) with BankID OAuth login."
@@ -22,13 +22,25 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 thiserror = "2"
-keyring = { version = "3", features = ["apple-native", "sync-secret-service"] }
 webbrowser = "1"
 url = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 comfy-table = "7"
 dirs = "5"
 rpassword = "7"
+
+# Keyring backend is platform-specific so the build needs no system libraries:
+# macOS uses the native Keychain; Linux uses the kernel keyutils (no libdbus);
+# Windows uses the Credential Manager. The `keychain` SB1_STORE option maps to
+# whichever of these is native to the platform.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["linux-native"] }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
 
 [profile.release]
 strip = true
