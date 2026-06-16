@@ -61,6 +61,23 @@ For everyday balance-glancing on the go, the bank's own app is still the better
 tool; reach for `sb1` when you want your money as something you can query,
 script, and pipe.
 
+## For AI agents
+
+`sb1` is designed for AI agent consumption: every command speaks `--json`, errors
+are explicit, and money-moving commands confirm first. The repo ships
+[agent skills](https://skills.sh) under [`skills/`](skills/) that teach an agent
+how to drive it safely:
+
+- `sparebank1-shared`: runtime contract (auth, storage, output, command map)
+- `sparebank1-accounts`: read accounts, balances, transactions, exports
+- `sparebank1-transfers`: money movement with confirmation safeguards
+
+Install them into your agent:
+
+```bash
+npx skills add magnusrodseth/sparebank1-cli
+```
+
 ## Install
 
 ```bash
@@ -96,25 +113,27 @@ cargo build --release           # ./target/release/sb1
 
 ## Secret storage
 
-Where the OAuth token and client credentials are kept, chosen with the
-`SB1_STORE` environment variable:
+Your OAuth token is effectively a standing key to your bank (the CLI can refresh
+access without a fresh BankID login), so where it lives matters. The store is
+chosen with the `SB1_STORE` environment variable, and **the default is your OS
+keychain**, so the easy path is also the secure one. `sb1 login` and `sb1 status`
+both print the active backend and all alternatives, so you always see your
+options.
 
 | `SB1_STORE` | Backend | Notes |
 | --- | --- | --- |
-| _unset_ / `file` | `~/.config/sparebank1-cli/*.json` (`0600`) | **Default.** No prompts. Keep this dir out of git and backups. |
-| `keychain` | macOS Keychain / Secret Service | Most secure at rest. Prompts after each rebuild of an unsigned binary. |
-| `op` / `1password` | 1Password via the `op` CLI | Needs `op` installed + signed in. Vault via `SB1_OP_VAULT` (default `Private`); account via `SB1_OP_ACCOUNT` if you have more than one. |
-
-Example (per-machine preference):
+| _unset_ / `keychain` | macOS Keychain / Linux Secret Service | **Default.** Secure at rest, gated by your login/biometric unlock. Needs a desktop session (unavailable on headless Linux/CI). Prompts after each rebuild of an unsigned binary. |
+| `op` / `1password` | 1Password via the `op` CLI | Secure, no per-rebuild prompt (the `op` session caches your unlock). Needs `op` installed + signed in. Vault via `SB1_OP_VAULT` (default `Private`); account via `SB1_OP_ACCOUNT` if you have more than one. |
+| `file` | `~/.config/sparebank1-cli/*.json` (`0600`) | **Opt-in. Plaintext on disk.** The only backend that works headless (servers, cron, CI, Docker), since it never prompts. Keep this dir out of git and cloud backups. |
 
 ```bash
-# Keychain
-export SB1_STORE=keychain
-
 # 1Password, no machine-password prompt; uses your 1Password unlock (Touch ID)
 export SB1_STORE=op
 export SB1_OP_ACCOUNT=my.1password.eu   # only needed with multiple op accounts
 export SB1_OP_VAULT=Private             # default
+
+# Plaintext files — only for headless automation where no keychain/op is available
+export SB1_STORE=file
 ```
 
 > Note on keychain prompts: an unsigned binary that you rebuild gets a new
@@ -123,9 +142,10 @@ export SB1_OP_VAULT=Private             # default
 > the `op` CLI caches your unlock for the session. For a prompt-free keychain,
 > code-sign the binary with a stable self-signed certificate.
 
-> ⚠ With the `file` backend, the files under `~/.config/sparebank1-cli/` are
-> **secrets**. Make sure that directory is never committed to version control or
-> synced to cloud backups.
+> ⚠ The `file` backend writes your token and credentials as **plaintext secrets**
+> under `~/.config/sparebank1-cli/`. Anything running as your user can read them,
+> and a synced home directory or cloud backup will capture them. Prefer `keychain`
+> or `op`; reach for `file` only on a headless box where neither is available.
 
 ## Usage
 
@@ -203,21 +223,6 @@ Norwegian locale.
 
 The OpenAPI specs this client was built against are saved under
 [`docs/api/`](docs/api/).
-
-## For AI agents
-
-This repo ships [agent skills](https://skills.sh) under [`skills/`](skills/) that
-teach an AI agent how to drive `sb1` safely:
-
-- `sparebank1-shared`: runtime contract (auth, storage, output, command map)
-- `sparebank1-accounts`: read accounts, balances, transactions, exports
-- `sparebank1-transfers`: money movement with confirmation safeguards
-
-Install them into your agent:
-
-```bash
-npx skills add magnusrodseth/sparebank1-cli
-```
 
 ## Development
 

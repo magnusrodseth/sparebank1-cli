@@ -42,8 +42,22 @@ fn resolve_credentials(args: &LoginArgs) -> anyhow::Result<ClientCredentials> {
     ))
 }
 
+/// Print the active storage backend and every alternative, so the user (and any
+/// agent driving the CLI) sees what is supported and how to switch via SB1_STORE.
+fn print_storage_overview() {
+    eprintln!("Secret storage (choose with the SB1_STORE environment variable):");
+    for (name, desc, active) in secrets::backend_options() {
+        let marker = if active { "→ active" } else { "        " };
+        eprintln!("  {marker}  {name:<9} {desc}");
+    }
+    eprintln!();
+}
+
 pub fn login(args: LoginArgs) -> anyhow::Result<()> {
     let creds = resolve_credentials(&args)?;
+
+    // Show all storage options up front so the choice is informed.
+    print_storage_overview();
 
     // Warn up front if secrets will land on disk (file backend), so the user
     // can ensure the directory is git-ignored and excluded from backups.
@@ -111,6 +125,10 @@ pub fn status(mode: OutputMode) -> anyhow::Result<()> {
             "expiresAt": expiry_str,
             "hasStoredCredentials": has_creds,
             "storageBackend": secrets::backend_name(),
+            "supportedBackends": secrets::backend_options()
+                .iter()
+                .map(|(name, _, _)| *name)
+                .collect::<Vec<_>>(),
         }));
     }
 
@@ -121,6 +139,11 @@ pub fn status(mode: OutputMode) -> anyhow::Result<()> {
     }
     println!("Credentials stored:  {}", yesno(has_creds));
     println!("Storage backend:     {}", secrets::backend_name());
+    println!("\nSecret storage options (set SB1_STORE):");
+    for (name, desc, active) in secrets::backend_options() {
+        let marker = if active { "→ active" } else { "        " };
+        println!("  {marker}  {name:<9} {desc}");
+    }
     println!("\n{}", terms::SUMMARY);
     Ok(())
 }

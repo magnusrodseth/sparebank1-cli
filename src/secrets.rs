@@ -4,17 +4,21 @@
 //! confidential and the user is personally responsible for protecting them.
 //!
 //! Three backends are supported, selected by the `SB1_STORE` environment
-//! variable:
+//! variable. The default is the OS keychain, so the easy path is also a secure
+//! one; plaintext files are an explicit, deliberate opt-in.
 //!
-//! - **`file`** (default): JSON files under `~/.config/sparebank1-cli/` with
-//!   `0600` permissions. No password prompts. The user is reminded to keep this
-//!   directory out of version control and backups.
-//! - **`keychain`**: the OS keychain (macOS Keychain / Secret Service). More
-//!   secure at rest, but prompts for the login password whenever the binary's
-//!   code signature changes (i.e. after each rebuild of an unsigned binary).
+//! - **`keychain`** (default): the OS keychain (macOS Keychain / Linux Secret
+//!   Service). Secure at rest, gated by your login/biometric unlock. On an
+//!   unsigned binary macOS re-prompts for the login password after each rebuild.
+//!   Needs a desktop session (no Secret Service daemon → unavailable on headless
+//!   Linux/CI).
 //! - **`op`** / **`1password`**: 1Password via the `op` CLI. Items live in a
 //!   vault (default `Private`, override with `SB1_OP_VAULT`). Requires `op`
 //!   installed and signed in; unlock is enforced by 1Password (biometrics).
+//! - **`file`** (opt-in): JSON files under `~/.config/sparebank1-cli/` with
+//!   `0600` permissions. No password prompts, so it is the only backend that
+//!   works headless (servers, cron, CI, Docker). The trade-off is plaintext on
+//!   disk: keep the directory out of version control and cloud backups.
 //!
 //! Bootstrap: on first run `login` may read credentials from CLI flags, the
 //! environment, or a local `.env` file (git-ignored), then persists them so the
@@ -33,7 +37,7 @@ const SERVICE: &str = "sparebank1-cli";
 const ACCT_CREDENTIALS: &str = "client-credentials";
 const ACCT_TOKEN: &str = "oauth-token";
 
-/// Storage backend, chosen by `SB1_STORE` (default: file).
+/// Storage backend, chosen by `SB1_STORE` (default: keychain).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Backend {
     File,
@@ -43,10 +47,36 @@ enum Backend {
 
 fn backend() -> Backend {
     match std::env::var("SB1_STORE").as_deref() {
-        Ok("keychain") => Backend::Keychain,
+        Ok("file") => Backend::File,
         Ok("op") | Ok("1password") => Backend::OnePassword,
-        _ => Backend::File,
+        // keychain is the secure default; anything unset/unknown falls back to it
+        // rather than silently writing plaintext.
+        _ => Backend::Keychain,
     }
+}
+
+/// One-line summary of every supported backend, for setup/status output so the
+/// user (and any agent driving the CLI) sees all alternatives. The boolean marks
+/// the currently active one.
+pub fn backend_options() -> Vec<(&'static str, &'static str, bool)> {
+    let active = backend();
+    vec![
+        (
+            "keychain",
+            "OS keychain (macOS Keychain / Linux Secret Service). Default, secure at rest.",
+            active == Backend::Keychain,
+        ),
+        (
+            "op",
+            "1Password via the `op` CLI. Unlock enforced by 1Password (biometrics).",
+            active == Backend::OnePassword,
+        ),
+        (
+            "file",
+            "Plaintext JSON in ~/.config/sparebank1-cli (0600). For headless/automation; keep out of git and backups.",
+            active == Backend::File,
+        ),
+    ]
 }
 
 /// 1Password vault for the `op` backend.
