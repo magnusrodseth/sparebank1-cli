@@ -229,7 +229,13 @@ impl Report {
         use comfy_table::{Cell, CellAlignment};
         // Counterparty/subscription names are personal, so they are masked too;
         // category labels, dates and month labels are not.
-        let name = |s: &str| if mask { MASKED.to_string() } else { s.to_string() };
+        let name = |s: &str| {
+            if mask {
+                MASKED.to_string()
+            } else {
+                s.to_string()
+            }
+        };
         println!(
             "Financial summary  ({} month(s): {} → {})\n",
             self.months, self.from, self.to
