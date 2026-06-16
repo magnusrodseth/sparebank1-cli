@@ -1,0 +1,36 @@
+[package]
+name = "sparebank1-cli"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "Feature-complete command-line client for the SpareBank 1 personal banking API (accounts, transactions, transfers) with BankID OAuth login."
+license = "MIT"
+repository = "https://github.com/magnusrodseth/sparebank1-cli"
+readme = "README.md"
+keywords = ["sparebank1", "banking", "cli", "bankid", "norway"]
+categories = ["command-line-utilities"]
+
+# The installed binary is `sb1`.
+[[bin]]
+name = "sb1"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "env", "wrap_help"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+keyring = { version = "3", features = ["apple-native", "sync-secret-service"] }
+webbrowser = "1"
+url = "2"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+comfy-table = "7"
+dirs = "5"
+rpassword = "7"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

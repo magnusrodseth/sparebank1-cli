@@ -1,0 +1,1 @@
+{"paths": {"/accounts/child/{id}": {"get": {"responses": {"default": {"content": {"application/vnd.sparebank1.v5+json; charset=utf-8": {}}, "description": "default response"}}, "parameters": [{"in": "path", "name": "id", "schema": {"type": "string"}, "required": true}], "operationId": "getAccounts"}}}, "openapi": "3.0.1"}

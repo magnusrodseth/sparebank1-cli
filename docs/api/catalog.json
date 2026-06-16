@@ -1,0 +1,194 @@
+{
+  "helloworld_or_a": {
+    "status": 200,
+    "body": {
+      "id": "1019228E99154B63A4E5FFBB43BD4EDE",
+      "name": "api-hello-world",
+      "title": "Hello World",
+      "basePath": "/common/helloworld",
+      "description": "This is a simple \"Hello world\" API for demo and testing purposes",
+      "market": "pm",
+      "resources": [
+        {
+          "id": "d308a2d8-f91d-4b68-a87e-103814bda50c",
+          "name": "helloworld",
+          "version": "1",
+          "lastModified": "2025-06-17T00:17:48.771+02:00",
+          "rest": {
+            "markdown": "The intention of the 3 endpoints is purely for testing and demonstration of the API deployment process and documentation presentation."
+          },
+          "soap": null
+        }
+      ]
+    }
+  },
+  "accounts": {
+    "status": 200,
+    "body": {
+      "id": "2682DF86994D4B348363BE9AC4644EFC",
+      "name": "api-pm-accounts",
+      "title": "Accounts",
+      "basePath": "/personal/banking/accounts",
+      "description": "Provides account, account details and account roles information",
+      "market": "pm",
+      "resources": [
+        {
+          "id": "30b36c06-4fe6-4426-a3e9-a99f88ab6995",
+          "name": "accounts",
+          "version": "5",
+          "lastModified": "2026-05-13T12:21:12.818+02:00",
+          "rest": {
+            "markdown": null
+          },
+          "soap": null
+        },
+        {
+          "id": "4417cb9c-3a4a-45d6-a06b-4f5a31d915a1",
+          "name": "accounts",
+          "version": "5",
+          "lastModified": "2026-05-13T12:21:12.83+02:00",
+          "rest": {
+            "markdown": null
+          },
+          "soap": null
+        },
+        {
+          "id": "91ac5ad4-3dfe-433d-8f26-9be280305a5f",
+          "name": "accounts",
+          "version": "5",
+          "lastModified": "2026-05-13T12:21:12.843+02:00",
+          "rest": {
+            "markdown": null
+          },
+          "soap": null
+        },
+        {
+          "id": "81251ce5-7266-4900-931d-e3c52645520a",
+          "name": "accounts",
+          "version": "5",
+          "lastModified": "2026-05-13T12:21:12.853+02:00",
+          "rest": {
+            "markdown": null
+          },
+          "soap": null
+        },
+        {
+          "id": "d1e2d5ca-3321-4791-9114-2c702adbfdbf",
+          "name": "accounts",
+          "version": "5",
+          "lastModified": "2026-05-13T12:21:12.863+02:00",
+          "rest": {
+            "markdown": null
+          },
+          "soap": null
+        },
+        {
+          "id": "16ccbd68-056a-4575-b033-b1692fff98f4",
+          "name": "accounts.child",
+          "version": "5",
+          "lastModified": "2026-05-13T12:21:12.873+02:00",
+          "rest": {
+            "markdown": null
+          },
+          "soap": null
+        }
+      ]
+    }
+  },
+  "transactions": {
+    "status": 200,
+    "body": {
+      "id": "9858DA06FBC842699E8E73B280DAF422",
+      "name": "api-pm-transaksjoner",
+      "title": "Transactions",
+      "basePath": "/personal/banking/transactions",
+      "description": "Provides transactions information",
+      "market": "pm",
+      "resources": [
+        {
+          "id": "d1e1ab4d-9613-4d34-9b08-7d0d0b7757e9",
+          "name": "transactions",
+          "version": "1",
+          "lastModified": "2026-05-29T12:18:20.775+02:00",
+          "rest": {
+            "markdown": null
+          },
+          "soap": null
+        },
+        {
+          "id": "117b7d16-a1d5-4a06-b390-daabeb47915d",
+          "name": "transactions",
+          "version": "1",
+          "lastModified": "2026-05-29T12:18:20.787+02:00",
+          "rest": {
+            "markdown": null
+          },
+          "soap": null
+        },
+        {
+          "id": "3d1df4ba-c01b-46f4-9a68-c32c07d9c8d9",
+          "name": "transactions",
+          "version": "1",
+          "lastModified": "2026-05-29T12:18:20.816+02:00",
+          "rest": {
+            "markdown": null
+          },
+          "soap": null
+        },
+        {
+          "id": "0650ec42-e688-42c4-b588-d1f65f98af2c",
+          "name": "transactions",
+          "version": "1",
+          "lastModified": "2026-05-29T12:18:20.83+02:00",
+          "rest": {
+            "markdown": null
+          },
+          "soap": null
+        }
+      ]
+    }
+  },
+  "transfer": {
+    "status": 200,
+    "body": {
+      "id": "AE260B846C7C43728DFCEC6BC59D25BE",
+      "name": "api-pm-transfer",
+      "title": "Transfer",
+      "basePath": "/personal/banking/transfer",
+      "description": "Completing transfers between your own accounts",
+      "market": "pm",
+      "resources": [
+        {
+          "id": "bb9cca27-7168-4a75-80c1-2486dab3f572",
+          "name": "creditcard",
+          "version": "1",
+          "lastModified": "2026-01-14T08:20:40.948+01:00",
+          "rest": {
+            "markdown": null
+          },
+          "soap": null
+        },
+        {
+          "id": "85dcc486-3f47-4eba-982c-805789fc5427",
+          "name": "debit",
+          "version": "1",
+          "lastModified": "2026-01-14T08:20:40.92+01:00",
+          "rest": {
+            "markdown": null
+          },
+          "soap": null
+        },
+        {
+          "id": "9bc60623-b3ce-4e32-888d-a1eae9d0c8ab",
+          "name": "pension",
+          "version": "1",
+          "lastModified": "2026-01-14T08:20:40.936+01:00",
+          "rest": {
+            "markdown": null
+          },
+          "soap": null
+        }
+      ]
+    }
+  }
+}
