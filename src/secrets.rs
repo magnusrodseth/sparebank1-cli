@@ -7,18 +7,17 @@
 //! variable. The default is the OS keychain, so the easy path is also a secure
 //! one; plaintext files are an explicit, deliberate opt-in.
 //!
-//! - **`keychain`** (default): the OS keychain (macOS Keychain / Linux Secret
-//!   Service). Secure at rest, gated by your login/biometric unlock. On an
-//!   unsigned binary macOS re-prompts for the login password after each rebuild.
-//!   Needs a desktop session (no Secret Service daemon → unavailable on headless
-//!   Linux/CI).
+//! - **`keychain`** (default): the platform-native secret store (macOS Keychain,
+//!   Linux kernel keyutils, Windows Credential Manager). Secure at rest, gated by
+//!   your OS. On macOS an unsigned binary re-prompts for the login password after
+//!   each rebuild.
 //! - **`op`** / **`1password`**: 1Password via the `op` CLI. Items live in a
 //!   vault (default `Private`, override with `SB1_OP_VAULT`). Requires `op`
 //!   installed and signed in; unlock is enforced by 1Password (biometrics).
 //! - **`file`** (opt-in): JSON files under `~/.config/sparebank1-cli/` with
-//!   `0600` permissions. No password prompts, so it is the only backend that
-//!   works headless (servers, cron, CI, Docker). The trade-off is plaintext on
-//!   disk: keep the directory out of version control and cloud backups.
+//!   `0600` permissions. No password prompts, so it is the most reliable backend
+//!   for headless automation (servers, cron, CI, Docker). The trade-off is
+//!   plaintext on disk: keep the directory out of version control and backups.
 //!
 //! Bootstrap: on first run `login` may read credentials from CLI flags, the
 //! environment, or a local `.env` file (git-ignored), then persists them so the
@@ -63,7 +62,7 @@ pub fn backend_options() -> Vec<(&'static str, &'static str, bool)> {
     vec![
         (
             "keychain",
-            "OS keychain (macOS Keychain / Linux Secret Service). Default, secure at rest.",
+            "Platform-native store (macOS Keychain / Linux keyutils / Windows Credential Manager). Default, secure at rest.",
             active == Backend::Keychain,
         ),
         (

@@ -122,9 +122,9 @@ options.
 
 | `SB1_STORE` | Backend | Notes |
 | --- | --- | --- |
-| _unset_ / `keychain` | macOS Keychain / Linux Secret Service | **Default.** Secure at rest, gated by your login/biometric unlock. Needs a desktop session (unavailable on headless Linux/CI). Prompts after each rebuild of an unsigned binary. |
+| _unset_ / `keychain` | macOS Keychain / Linux kernel keyutils / Windows Credential Manager | **Default.** Secure at rest, gated by your OS. On macOS an unsigned binary re-prompts for your login password after each rebuild. |
 | `op` / `1password` | 1Password via the `op` CLI | Secure, no per-rebuild prompt (the `op` session caches your unlock). Needs `op` installed + signed in. Vault via `SB1_OP_VAULT` (default `Private`); account via `SB1_OP_ACCOUNT` if you have more than one. |
-| `file` | `~/.config/sparebank1-cli/*.json` (`0600`) | **Opt-in. Plaintext on disk.** The only backend that works headless (servers, cron, CI, Docker), since it never prompts. Keep this dir out of git and cloud backups. |
+| `file` | `~/.config/sparebank1-cli/*.json` (`0600`) | **Opt-in. Plaintext on disk.** The most reliable backend for headless automation (servers, cron, CI, Docker) since it never prompts. Keep this dir out of git and cloud backups. |
 
 ```bash
 # 1Password, no machine-password prompt; uses your 1Password unlock (Touch ID)
