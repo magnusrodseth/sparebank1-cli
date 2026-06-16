@@ -1,5 +1,9 @@
 # sb1
 
+<p align="center">
+  <img src="docs/banner.png" alt="A person at a laptop and an AI agent managing money together, with a piggy bank and kroner coins" width="640">
+</p>
+
 CLI for the [SpareBank 1 personal banking API](https://developer.sparebank1.no).
 Designed for AI agent consumption.
 

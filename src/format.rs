@@ -78,16 +78,24 @@ pub fn account_detail_table(a: &Account) {
     println!("{table}");
 }
 
-/// Render transactions as an aligned table.
+/// Render transactions as an aligned table. When the rows span more than one
+/// account, an "Account" column is added so each row can be attributed.
 pub fn transactions_table(txns: &[Transaction]) {
+    let multi_account = txns
+        .iter()
+        .filter_map(|t| t.account_name.as_deref())
+        .filter(|s| !s.is_empty())
+        .collect::<std::collections::HashSet<_>>()
+        .len()
+        > 1;
+
     let mut table = base_table();
-    table.set_header(vec![
-        "Date",
-        "Description",
-        "Amount",
-        "Status",
-        "Counterparty",
-    ]);
+    let mut header = vec!["Date", "Description", "Amount", "Status", "Counterparty"];
+    if multi_account {
+        header.insert(1, "Account");
+    }
+    table.set_header(header);
+
     for t in txns {
         let counterparty = t
             .remote_account_name
@@ -95,13 +103,15 @@ pub fn transactions_table(txns: &[Transaction]) {
             .filter(|s| !s.is_empty())
             .or_else(|| t.remote_account_number.clone())
             .unwrap_or_default();
-        table.add_row(vec![
-            Cell::new(t.date_str()),
-            Cell::new(t.best_description()),
-            Cell::new(format_kr(t.amount_value())).set_alignment(CellAlignment::Right),
-            Cell::new(t.booking_status.clone().unwrap_or_default()),
-            Cell::new(counterparty),
-        ]);
+        let mut row = vec![Cell::new(t.date_str())];
+        if multi_account {
+            row.push(Cell::new(t.account_name.clone().unwrap_or_default()));
+        }
+        row.push(Cell::new(t.best_description()));
+        row.push(Cell::new(format_kr(t.amount_value())).set_alignment(CellAlignment::Right));
+        row.push(Cell::new(t.booking_status.clone().unwrap_or_default()));
+        row.push(Cell::new(counterparty));
+        table.add_row(row);
     }
     println!("{table}");
 
