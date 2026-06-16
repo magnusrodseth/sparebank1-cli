@@ -49,6 +49,29 @@ pub fn format_kr(amount: f64) -> String {
     format!("{sign}kr {grouped},{rest:02}")
 }
 
+/// Placeholder for a masked free-text value (name, account number, counterparty)
+/// when `--mask` is active.
+pub const MASKED: &str = "*****";
+
+/// Masked amount, preserving the sign and `kr` shape so masked tables still look
+/// like real output (`-kr *****` / `kr *****`).
+pub fn mask_kr(amount: f64) -> String {
+    if amount < 0.0 {
+        "-kr *****".to_string()
+    } else {
+        "kr *****".to_string()
+    }
+}
+
+/// Format an amount, masked when `mask` is set, otherwise the normal kr format.
+pub fn kr(amount: f64, mask: bool) -> String {
+    if mask {
+        mask_kr(amount)
+    } else {
+        format_kr(amount)
+    }
+}
+
 /// A `DateTime<Local>` for `n` days ago, as `YYYY-MM-DD`.
 pub fn days_ago(n: i64) -> String {
     (Local::now() - chrono::Duration::days(n))
@@ -96,6 +119,26 @@ mod tests {
     #[test]
     fn negative_zero_has_no_minus_sign() {
         assert_eq!(format_kr(-0.0), "kr 0,00");
+    }
+
+    #[test]
+    fn mask_kr_keeps_sign_and_currency_shape() {
+        assert_eq!(mask_kr(0.0), "kr *****");
+        assert_eq!(mask_kr(1234.56), "kr *****");
+        assert_eq!(mask_kr(-1234.56), "-kr *****");
+    }
+
+    #[test]
+    fn mask_kr_treats_negative_zero_as_positive() {
+        // Matches format_kr: -0.0 is not < 0.0, so no leading minus.
+        assert_eq!(mask_kr(-0.0), "kr *****");
+    }
+
+    #[test]
+    fn kr_masks_only_when_flag_set() {
+        assert_eq!(kr(1234.5, false), format_kr(1234.5));
+        assert_eq!(kr(1234.5, true), mask_kr(1234.5));
+        assert_eq!(kr(-99.0, true), "-kr *****");
     }
 
     #[test]

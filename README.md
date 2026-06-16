@@ -182,6 +182,10 @@ sb1 --json accounts
 # Financial overview: net worth, monthly cash flow, categories, subscriptions
 sb1 summary --months 6
 sb1 --json summary
+
+# Mask sensitive values for screenshots (amounts, account numbers, names)
+sb1 summary --months 6 --mask
+sb1 accounts --mask
 ```
 
 `--classified` enriches transactions with the bank's own category, recurring,
@@ -193,6 +197,13 @@ Most commands take an account as a positional argument (`sb1 account Brukskonto`
 `sb1 transactions Brukskonto`). `transactions` also accepts the older
 `-a`/`--account` flag and lets you pass several accounts (positionally or with
 repeated `-a`); omit the account entirely to query all of them.
+
+`--mask` is a global flag for sharing screenshots: it replaces sensitive values
+(amounts, account numbers, owner names, transaction descriptions, counterparties,
+savings rate) with `*****` in table output while keeping categories, dates, and
+labels visible. Masked amounts keep their sign and `kr` shape (`-kr *****`) so the
+output still looks real. It has no effect on `--json` or CSV output, which stay
+unredacted for automation.
 
 `debit` transfers are restricted to **your own accounts**: both `--from` and
 `--to` must resolve to accounts in your account list. Amounts accept `250`,

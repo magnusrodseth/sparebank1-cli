@@ -7,7 +7,7 @@ use crate::client::AccountListOpts;
 use crate::commands::{authed_client, resolve_account};
 use crate::format::{self, OutputMode};
 
-pub fn list(args: AccountsArgs, mode: OutputMode) -> anyhow::Result<()> {
+pub fn list(args: AccountsArgs, mode: OutputMode, mask: bool) -> anyhow::Result<()> {
     let client = authed_client()?;
     let all = args.all;
     let opts = AccountListOpts {
@@ -26,14 +26,14 @@ pub fn list(args: AccountsArgs, mode: OutputMode) -> anyhow::Result<()> {
             if accounts.is_empty() {
                 println!("No accounts found.");
             } else {
-                format::accounts_table(&accounts);
+                format::accounts_table(&accounts, mask);
             }
             Ok(())
         }
     }
 }
 
-pub fn show(args: AccountArgs, mode: OutputMode) -> anyhow::Result<()> {
+pub fn show(args: AccountArgs, mode: OutputMode, mask: bool) -> anyhow::Result<()> {
     let client = authed_client()?;
     let account = resolve_account(&client, &args.account)?;
 
@@ -56,7 +56,7 @@ pub fn show(args: AccountArgs, mode: OutputMode) -> anyhow::Result<()> {
     match mode {
         OutputMode::Json => format::print_json(&account_json(&account)),
         OutputMode::Table => {
-            format::account_detail_table(&account);
+            format::account_detail_table(&account, mask);
             Ok(())
         }
     }

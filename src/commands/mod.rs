@@ -97,20 +97,21 @@ pub fn resolve_account_ref(accounts: &[Account], input: &str) -> anyhow::Result<
 /// Top-level dispatch.
 pub fn run(cli: Cli) -> anyhow::Result<()> {
     let mode = output_mode(&cli);
+    let mask = cli.mask;
     match cli.command {
         Command::Login(args) => auth::login(args),
         Command::Logout { all } => auth::logout(all),
         Command::Status => auth::status(mode),
         Command::Hello => auth::hello(),
         Command::Refresh => auth::refresh(),
-        Command::Accounts(args) => accounts::list(args, mode),
-        Command::Account(args) => accounts::show(args, mode),
+        Command::Accounts(args) => accounts::list(args, mode, mask),
+        Command::Account(args) => accounts::show(args, mode, mask),
         Command::Balance { account_number } => accounts::balance(account_number),
-        Command::Transactions(args) => transactions::list(args, mode),
+        Command::Transactions(args) => transactions::list(args, mode, mask),
         Command::Transaction { id, classified } => transactions::show(id, classified),
         Command::Export(args) => transactions::export(args),
         Command::Transfer { kind } => transfer::run(kind, mode),
-        Command::Summary { months } => summary::run(months, mode),
+        Command::Summary { months } => summary::run(months, mode, mask),
     }
 }
 

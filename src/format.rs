@@ -8,7 +8,7 @@ use comfy_table::{Cell, CellAlignment, ContentArrangement, Table};
 use serde::Serialize;
 
 use crate::models::{Account, Transaction};
-use crate::util::format_kr;
+use crate::util::{kr, MASKED};
 
 /// Global output mode, set from the top-level `--json` flag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,15 +30,17 @@ fn base_table() -> Table {
     t
 }
 
-/// Render accounts as an aligned table.
-pub fn accounts_table(accounts: &[Account]) {
+/// Render accounts as an aligned table. With `mask`, account numbers and
+/// balances are hidden (for sharing screenshots); names/currency/key stay.
+pub fn accounts_table(accounts: &[Account], mask: bool) {
     let mut table = base_table();
     table.set_header(vec!["Name", "Account no.", "Balance", "Ccy", "Key"]);
     for a in accounts {
+        let number = if mask { MASKED.to_string() } else { a.number() };
         table.add_row(vec![
             Cell::new(&a.name),
-            Cell::new(a.number()),
-            Cell::new(format_kr(a.display_balance())).set_alignment(CellAlignment::Right),
+            Cell::new(number),
+            Cell::new(kr(a.display_balance(), mask)).set_alignment(CellAlignment::Right),
             Cell::new(a.currency()),
             Cell::new(&a.key),
         ]);
@@ -49,26 +51,30 @@ pub fn accounts_table(accounts: &[Account]) {
         .filter(|a| a.currency() == "NOK")
         .map(|a| a.display_balance())
         .sum();
-    println!("\nTotal (NOK accounts): {}", format_kr(total));
+    println!("\nTotal (NOK accounts): {}", kr(total, mask));
 }
 
-/// Render a single account as a key/value table.
-pub fn account_detail_table(a: &Account) {
+/// Render a single account as a key/value table. With `mask`, the account
+/// number, balances and owner name are hidden.
+pub fn account_detail_table(a: &Account, mask: bool) {
     let mut table = base_table();
     table.set_header(vec!["Field", "Value"]);
+    let masked = |real: String| if mask { MASKED.to_string() } else { real };
     let rows = [
         ("Name", a.name.clone()),
-        ("Account number", a.number()),
-        ("Balance", format_kr(a.balance.unwrap_or(0.0))),
-        ("Available", format_kr(a.available_balance.unwrap_or(0.0))),
+        ("Account number", masked(a.number())),
+        ("Balance", kr(a.balance.unwrap_or(0.0), mask)),
+        ("Available", kr(a.available_balance.unwrap_or(0.0), mask)),
         ("Currency", a.currency().to_string()),
         ("Type", a.account_type.clone().unwrap_or_default()),
         (
             "Owner",
-            a.owner
-                .as_ref()
-                .and_then(|o| o.name.clone())
-                .unwrap_or_default(),
+            masked(
+                a.owner
+                    .as_ref()
+                    .and_then(|o| o.name.clone())
+                    .unwrap_or_default(),
+            ),
         ),
         ("Key", a.key.clone()),
     ];
@@ -80,7 +86,7 @@ pub fn account_detail_table(a: &Account) {
 
 /// Render transactions as an aligned table. When the rows span more than one
 /// account, an "Account" column is added so each row can be attributed.
-pub fn transactions_table(txns: &[Transaction]) {
+pub fn transactions_table(txns: &[Transaction], mask: bool) {
     let multi_account = txns
         .iter()
         .filter_map(|t| t.account_name.as_deref())
@@ -102,18 +108,28 @@ pub fn transactions_table(txns: &[Transaction]) {
     table.set_header(header);
 
     for t in txns {
-        let counterparty = t
-            .remote_account_name
-            .clone()
-            .filter(|s| !s.is_empty())
-            .or_else(|| t.remote_account_number.clone())
-            .unwrap_or_default();
+        // Description and counterparty are free text that can leak merchants and
+        // names, so they are masked too; date, account, status and category stay.
+        let counterparty = if mask {
+            MASKED.to_string()
+        } else {
+            t.remote_account_name
+                .clone()
+                .filter(|s| !s.is_empty())
+                .or_else(|| t.remote_account_number.clone())
+                .unwrap_or_default()
+        };
+        let description = if mask {
+            MASKED.to_string()
+        } else {
+            t.best_description()
+        };
         let mut row = vec![Cell::new(t.date_str())];
         if multi_account {
             row.push(Cell::new(t.account_name.clone().unwrap_or_default()));
         }
-        row.push(Cell::new(t.best_description()));
-        row.push(Cell::new(format_kr(t.amount_value())).set_alignment(CellAlignment::Right));
+        row.push(Cell::new(description));
+        row.push(Cell::new(kr(t.amount_value(), mask)).set_alignment(CellAlignment::Right));
         row.push(Cell::new(t.booking_status.clone().unwrap_or_default()));
         row.push(Cell::new(counterparty));
         if has_category {
@@ -124,7 +140,7 @@ pub fn transactions_table(txns: &[Transaction]) {
     println!("{table}");
 
     let sum: f64 = txns.iter().map(|t| t.amount_value()).sum();
-    println!("\n{} transaction(s). Net: {}", txns.len(), format_kr(sum));
+    println!("\n{} transaction(s). Net: {}", txns.len(), kr(sum, mask));
 }
 
 /// Render transactions as CSV (id,date,description,amount,status,counterparty,

@@ -23,7 +23,7 @@ use crate::format::{self, OutputMode};
 use crate::models::{Account, Transaction};
 use crate::util::{self, format_kr};
 
-pub fn run(months: i64, mode: OutputMode) -> anyhow::Result<()> {
+pub fn run(months: i64, mode: OutputMode, mask: bool) -> anyhow::Result<()> {
     let months = months.max(1);
     let client = authed_client()?;
 
@@ -68,7 +68,7 @@ pub fn run(months: i64, mode: OutputMode) -> anyhow::Result<()> {
     match mode {
         OutputMode::Json => report.print_json(),
         OutputMode::Table => {
-            report.print_table();
+            report.print_table(mask);
             Ok(())
         }
     }
@@ -224,8 +224,12 @@ impl Report {
         }
     }
 
-    fn print_table(&self) {
+    fn print_table(&self, mask: bool) {
+        use crate::util::{kr, MASKED};
         use comfy_table::{Cell, CellAlignment};
+        // Counterparty/subscription names are personal, so they are masked too;
+        // category labels, dates and month labels are not.
+        let name = |s: &str| if mask { MASKED.to_string() } else { s.to_string() };
         println!(
             "Financial summary  ({} month(s): {} → {})\n",
             self.months, self.from, self.to
@@ -234,27 +238,31 @@ impl Report {
         // Net worth
         println!("Net worth");
         for (ccy, total) in &self.net_worth {
-            println!("  {ccy}: {}", money(*total, ccy));
+            println!("  {ccy}: {}", money(*total, ccy, mask));
         }
         println!(
             "  assets {}   liabilities {}",
-            format_kr(self.assets),
-            format_kr(self.liabilities)
+            kr(self.assets, mask),
+            kr(self.liabilities, mask)
         );
 
         // Cash flow
         let net = self.income + self.spending;
         println!("\nCash flow (internal transfers excluded)");
-        println!("  income    {:>14}", format_kr(self.income));
-        println!("  spending  {:>14}", format_kr(self.spending));
-        println!("  net       {:>14}", format_kr(net));
+        println!("  income    {:>14}", kr(self.income, mask));
+        println!("  spending  {:>14}", kr(self.spending, mask));
+        println!("  net       {:>14}", kr(net, mask));
         if let Some(rate) = self.savings_rate() {
-            println!("  savings rate: {rate:.0}%");
+            if mask {
+                println!("  savings rate: ***%");
+            } else {
+                println!("  savings rate: {rate:.0}%");
+            }
         }
         println!(
             "  monthly avg: in {}, out {}",
-            format_kr(self.income / self.months as f64),
-            format_kr(self.spending / self.months as f64)
+            kr(self.income / self.months as f64, mask),
+            kr(self.spending / self.months as f64, mask)
         );
 
         // Monthly breakdown
@@ -263,9 +271,9 @@ impl Report {
         for (m, (i, o)) in &self.monthly {
             t.add_row(vec![
                 Cell::new(m),
-                Cell::new(format_kr(*i)).set_alignment(CellAlignment::Right),
-                Cell::new(format_kr(*o)).set_alignment(CellAlignment::Right),
-                Cell::new(format_kr(i + o)).set_alignment(CellAlignment::Right),
+                Cell::new(kr(*i, mask)).set_alignment(CellAlignment::Right),
+                Cell::new(kr(*o, mask)).set_alignment(CellAlignment::Right),
+                Cell::new(kr(i + o, mask)).set_alignment(CellAlignment::Right),
             ]);
         }
         println!("\nBy month");
@@ -278,7 +286,7 @@ impl Report {
             for (c, v) in &self.categories {
                 t.add_row(vec![
                     Cell::new(c),
-                    Cell::new(format_kr(*v)).set_alignment(CellAlignment::Right),
+                    Cell::new(kr(*v, mask)).set_alignment(CellAlignment::Right),
                 ]);
             }
             println!("\nSpending by category (bank-classified)");
@@ -290,8 +298,8 @@ impl Report {
         t.set_header(vec!["Counterparty / description", "Spent"]);
         for (p, v) in &self.top_out {
             t.add_row(vec![
-                Cell::new(p),
-                Cell::new(format_kr(*v)).set_alignment(CellAlignment::Right),
+                Cell::new(name(p)),
+                Cell::new(kr(*v, mask)).set_alignment(CellAlignment::Right),
             ]);
         }
         println!("\nTop outgoing");
@@ -303,8 +311,8 @@ impl Report {
             t.set_header(vec!["Subscription", "Charge"]);
             for (n, v) in &self.subscriptions {
                 t.add_row(vec![
-                    Cell::new(n),
-                    Cell::new(format_kr(*v)).set_alignment(CellAlignment::Right),
+                    Cell::new(name(n)),
+                    Cell::new(kr(*v, mask)).set_alignment(CellAlignment::Right),
                 ]);
             }
             println!("\nLikely subscriptions (bank-flagged)");
@@ -341,7 +349,10 @@ fn base() -> comfy_table::Table {
 }
 
 /// Format money in a currency: NOK uses the kr formatter, others a plain suffix.
-fn money(v: f64, ccy: &str) -> String {
+fn money(v: f64, ccy: &str, mask: bool) -> String {
+    if mask {
+        return crate::util::mask_kr(v);
+    }
     if ccy == "NOK" {
         format_kr(v)
     } else {

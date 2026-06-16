@@ -14,6 +14,12 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
+    /// Mask sensitive values (amounts, account numbers, names) in table output,
+    /// for sharing screenshots. Categories, dates and labels stay visible. Has no
+    /// effect on --json or CSV output.
+    #[arg(long, global = true)]
+    pub mask: bool,
+
     #[command(subcommand)]
     pub command: Command,
 }

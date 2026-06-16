@@ -10,7 +10,7 @@ use crate::commands::{authed_client, resolve_account};
 use crate::format::{self, OutputMode};
 use crate::util;
 
-pub fn list(args: TxnArgs, mode: OutputMode) -> anyhow::Result<()> {
+pub fn list(args: TxnArgs, mode: OutputMode, mask: bool) -> anyhow::Result<()> {
     let client = authed_client()?;
 
     // Resolve each account reference (positional or -a/--account) to its key.
@@ -87,7 +87,7 @@ pub fn list(args: TxnArgs, mode: OutputMode) -> anyhow::Result<()> {
             if txns.is_empty() {
                 println!("No transactions in range.");
             } else {
-                format::transactions_table(&txns);
+                format::transactions_table(&txns, mask);
             }
         }
     }
