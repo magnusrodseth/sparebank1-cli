@@ -96,12 +96,14 @@ sb1 account Brukskonto --details # extended details
 sb1 account Brukskonto --roles   # roles
 sb1 balance 1234.56.78903        # balance by account number
 
-# Transactions
-sb1 transactions -a Brukskonto --days 30
-sb1 transactions -a Brukskonto --from 2026-01-01 --to 2026-03-31
-sb1 transactions -a Brukskonto --classified
+# Transactions (account is positional, or use -a/--account; omit for all accounts)
+sb1 transactions Brukskonto --days 30
+sb1 transactions Brukskonto Sparekonto --days 30  # multiple accounts
+sb1 transactions -a Brukskonto --days 30          # -a/--account works too
+sb1 transactions Brukskonto --from 2026-01-01 --to 2026-03-31
+sb1 transactions Brukskonto --classified
 sb1 transaction <id>             # details for one transaction
-sb1 transactions -a Brukskonto --csv -o out.csv   # local CSV
+sb1 transactions Brukskonto --csv -o out.csv      # local CSV
 sb1 export -a Brukskonto -o booked.csv            # server-side CSV export
 
 # Transfers (always confirms first; -y to skip)
@@ -123,9 +125,20 @@ and subscription flags. `summary` builds on the same classification, so its
 categories work for any account setup (no hardcoded merchants); internal
 transfers between your own accounts are excluded automatically.
 
+Most commands take an account as a positional argument (`sb1 account Brukskonto`,
+`sb1 transactions Brukskonto`). `transactions` also accepts the older
+`-a`/`--account` flag and lets you pass several accounts (positionally or with
+repeated `-a`); omit the account entirely to query all of them.
+
 `debit` transfers are restricted to **your own accounts**: both `--from` and
 `--to` must resolve to accounts in your account list. Amounts accept `250`,
 `250.50`, or `250,50`.
+
+The two CSV paths differ. `transactions --csv` produces a comma-delimited UTF-8
+file from the client. `export` streams the bank's own server-side CSV, which is
+**semicolon-delimited with a UTF-8 BOM and Norwegian headers** (`Dato`,
+`Beskrivelse`, `Rentedato`, `Inn`, `Ut`, ...), the format Excel expects in a
+Norwegian locale.
 
 ## Commands
 

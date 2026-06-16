@@ -13,8 +13,10 @@ use crate::util;
 pub fn list(args: TxnArgs, mode: OutputMode) -> anyhow::Result<()> {
     let client = authed_client()?;
 
-    // Resolve each --account reference to its key. If none given, use all.
-    let account_keys: Vec<String> = if args.accounts.is_empty() {
+    // Resolve each account reference (positional or -a/--account) to its key.
+    // If none given, use all accounts.
+    let account_refs = args.account_refs();
+    let account_keys: Vec<String> = if account_refs.is_empty() {
         client
             .accounts(&Default::default())?
             .into_iter()
@@ -22,7 +24,7 @@ pub fn list(args: TxnArgs, mode: OutputMode) -> anyhow::Result<()> {
             .collect()
     } else {
         let mut keys = Vec::new();
-        for a in &args.accounts {
+        for a in &account_refs {
             keys.push(resolve_account(&client, a)?.key);
         }
         keys

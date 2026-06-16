@@ -132,10 +132,13 @@ pub struct AccountArgs {
 
 #[derive(Debug, Args)]
 pub struct TxnArgs {
-    /// Account name, key, or number. Repeat for multiple. Defaults to all
-    /// accounts if omitted.
-    #[arg(long = "account", short = 'a')]
-    pub accounts: Vec<String>,
+    /// Account name, key, or number, given positionally. Repeat for multiple.
+    /// Equivalent to -a/--account. Defaults to all accounts if omitted.
+    #[arg(value_name = "ACCOUNT")]
+    pub positional_accounts: Vec<String>,
+    /// Account name, key, or number (same as positional). Repeat for multiple.
+    #[arg(long = "account", short = 'a', value_name = "ACCOUNT")]
+    pub flag_accounts: Vec<String>,
     /// Start date (YYYY-MM-DD). Defaults to 30 days ago.
     #[arg(long)]
     pub from: Option<String>,
@@ -160,6 +163,17 @@ pub struct TxnArgs {
     /// Write output to a file instead of stdout.
     #[arg(long, short = 'o')]
     pub output: Option<String>,
+}
+
+impl TxnArgs {
+    /// All account references, combining positional args and -a/--account flags.
+    pub fn account_refs(&self) -> Vec<String> {
+        self.positional_accounts
+            .iter()
+            .chain(&self.flag_accounts)
+            .cloned()
+            .collect()
+    }
 }
 
 #[derive(Debug, Args)]
