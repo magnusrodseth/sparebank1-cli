@@ -80,6 +80,19 @@ npx skills add magnusrodseth/sparebank1-cli
 
 ## Install
 
+Prebuilt binary (macOS and Linux, no toolchain required). Installs to
+`~/.local/bin`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/magnusrodseth/sparebank1-cli/main/install.sh | bash
+```
+
+Pin a version with `SB1_VERSION=v1.1.0`, or change the location with
+`SB1_INSTALL_DIR`. Make sure the install dir is on your `PATH`, then run
+`sb1 --help`.
+
+From source (requires a Rust toolchain):
+
 ```bash
 cargo install --path .          # installs the `sb1` binary
 # or run from the repo:
