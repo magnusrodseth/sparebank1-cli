@@ -71,6 +71,8 @@ how to drive it safely:
 - `sparebank1-shared`: runtime contract (auth, storage, output, command map)
 - `sparebank1-accounts`: read accounts, balances, transactions, exports
 - `sparebank1-transfers`: money movement with confirmation safeguards
+- `sparebank1-context`: a short interview that builds a private, git-ignored
+  finance context the agent reads to reason over *your* money
 
 Install them into your agent:
 

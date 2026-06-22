@@ -58,6 +58,8 @@ npx skills add magnusrodseth/sparebank1-cli
 - `sparebank1-shared` — runtime contract (auth, storage, output, command map). Read this first.
 - `sparebank1-accounts` — read accounts, balances, transactions, exports.
 - `sparebank1-transfers` — money movement, with confirmation safeguards.
+- `sparebank1-context` — interview the user once, then read a private,
+  git-ignored finance context to reason over *their* money in later sessions.
 
 ## Operating rules for agents
 
