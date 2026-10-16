@@ -23,7 +23,21 @@ use crate::models::{Account, Transaction};
 use crate::profiles::Profile;
 use crate::util::{self, format_kr};
 
-pub fn run(months: i64, mode: OutputMode, mask: bool, profile: &Profile) -> anyhow::Result<()> {
+pub fn run(
+    months: i64,
+    mode: OutputMode,
+    mask: bool,
+    selected: Option<&str>,
+    all_profiles: bool,
+) -> anyhow::Result<()> {
+    if all_profiles {
+        return run_aggregate(months, mode, mask);
+    }
+    let clients = crate::commands::aggregate::clients_for(selected, false)?;
+    run_single(months, mode, mask, &clients.clients[0].profile)
+}
+
+fn run_single(months: i64, mode: OutputMode, mask: bool, profile: &Profile) -> anyhow::Result<()> {
     let months = months.max(1);
     let client = crate::commands::authed_client_for(profile)?;
 
@@ -68,6 +82,92 @@ pub fn run(months: i64, mode: OutputMode, mask: bool, profile: &Profile) -> anyh
     match mode {
         OutputMode::Json => report.print_json(),
         OutputMode::Table => {
+            report.print_table(mask);
+            Ok(())
+        }
+    }
+}
+
+fn run_aggregate(months: i64, mode: OutputMode, mask: bool) -> anyhow::Result<()> {
+    let months = months.max(1);
+    let mut clients = crate::commands::aggregate::clients_for(None, true)?;
+    let entries = clients.fetch_accounts(&crate::commands::accounts::all_accounts_opts());
+    let accounts: Vec<Account> = entries.iter().map(|entry| entry.account.clone()).collect();
+    let own_numbers = own_account_numbers(&accounts);
+    let from = util::days_ago(months * 30);
+    let to = util::today();
+    let mut txns = Vec::new();
+
+    for entry in entries {
+        if clients.is_rate_limited() {
+            break;
+        }
+        let account_key = match crate::commands::aggregate::account_key(&entry) {
+            Ok(key) => key.to_owned(),
+            Err(error) => {
+                let source = entry.profiles.first().cloned().unwrap_or_default();
+                clients.add_failure(&source, error);
+                continue;
+            }
+        };
+        let query = TxnQuery {
+            account_keys: vec![account_key],
+            from_date: Some(from.clone()),
+            to_date: Some(to.clone()),
+            row_limit: None,
+            source: Some("ALL".to_string()),
+            classified: true,
+        };
+        let result = clients.first_success(&entry.profiles, |profile_client| match profile_client
+            .client
+            .transactions(&query)
+        {
+            Ok(response) => Ok(response),
+            Err(classified_error)
+                if matches!(
+                    classified_error,
+                    crate::error::Sb1Error::Api { status: 404, .. }
+                ) =>
+            {
+                let fallback_query = TxnQuery {
+                    classified: false,
+                    ..query.clone()
+                };
+                match profile_client.client.transactions(&fallback_query) {
+                    Ok(response) => Ok(response),
+                    Err(fallback_error) => Err(anyhow::Error::from(fallback_error).context(
+                        format!("classified endpoint unavailable ({classified_error})"),
+                    )),
+                }
+            }
+            Err(error) => Err(anyhow::Error::from(error)),
+        });
+        if let Some((source, response)) = result {
+            for error in response.errors {
+                clients.add_failure(&source, error);
+            }
+            txns.extend(response.transactions);
+        }
+    }
+
+    clients.report_failures();
+    let report = build_report(&accounts, &txns, &own_numbers, months, &from, &to);
+    match mode {
+        OutputMode::Json => {
+            let mut value = report.json_value();
+            value["complete"] = serde_json::json!(clients.complete());
+            value["profiles"] = serde_json::json!(clients.profiles);
+            value["errors"] = clients.failures_json();
+            format::print_json(&value)
+        }
+        OutputMode::Table => {
+            println!(
+                "Aggregate view across profiles: {}",
+                clients.profiles.join(", ")
+            );
+            if !clients.complete() {
+                println!("⚠ Aggregate is incomplete; see profile errors on stderr.");
+            }
             report.print_table(mask);
             Ok(())
         }
@@ -327,8 +427,12 @@ impl Report {
     }
 
     fn print_json(&self) -> anyhow::Result<()> {
+        format::print_json(&self.json_value())
+    }
+
+    fn json_value(&self) -> serde_json::Value {
         let net: f64 = self.income + self.spending;
-        format::print_json(&serde_json::json!({
+        serde_json::json!({
             "period": { "months": self.months, "from": self.from, "to": self.to },
             "netWorth": self.net_worth,
             "assets": self.assets,
@@ -343,7 +447,7 @@ impl Report {
             "topOutgoing": self.top_out.iter().map(|(p,v)| serde_json::json!({"party": p, "amount": v})).collect::<Vec<_>>(),
             "categories": self.categories.iter().map(|(c,v)| serde_json::json!({"category": c, "amount": v})).collect::<Vec<_>>(),
             "subscriptions": self.subscriptions.iter().map(|(n,v)| serde_json::json!({"name": n, "amount": v})).collect::<Vec<_>>(),
-        }))
+        })
     }
 }
 

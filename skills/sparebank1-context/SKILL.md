@@ -56,6 +56,15 @@ Choose the profile from the user's request or the default marked by `sb1 status`
 Use that same `--profile <profile-name>` for all banking commands in this session. Never
 apply one profile's context to another profile's balances or transactions.
 
+For a deliberate household analysis using `--all-profiles`, use a separate
+aggregate context at
+`~/.config/sparebank1-cli/contexts/aggregate/context.md`. Create or update it
+only with the user's input. Keep each person's profile context separate and do
+not copy its notes into the aggregate context automatically. Attribute any
+household note to the relevant profile or shared account, and use the aggregate
+context only for aggregate commands. `SB1_CONTEXT_FILE` may explicitly select
+the context for a session.
+
 ## When to run
 
 - **First time:** no context file exists → run the full interview below.

@@ -158,12 +158,22 @@ fn fake_bank_once(reply: &'static str) -> (String, thread::JoinHandle<String>) {
 fn fake_bank_sequence(
     replies: &'static [&'static str],
 ) -> (String, thread::JoinHandle<Vec<String>>) {
+    let responses = replies
+        .iter()
+        .map(|reply| (200, *reply))
+        .collect::<Vec<_>>();
+    fake_bank_status_sequence(Box::leak(responses.into_boxed_slice()))
+}
+
+fn fake_bank_status_sequence(
+    responses: &'static [(u16, &'static str)],
+) -> (String, thread::JoinHandle<Vec<String>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let handle = thread::spawn(move || {
         let mut requests = Vec::new();
-        for reply in replies {
+        for (status, reply) in responses {
             let deadline = Instant::now() + Duration::from_secs(15);
             let mut stream = loop {
                 match listener.accept() {
@@ -204,7 +214,18 @@ fn fake_bank_sequence(
                     }
                 }
             }
-            let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}", reply.len());
+            let reason = match status {
+                200 => "OK",
+                429 => "Too Many Requests",
+                500 => "Internal Server Error",
+                _ => "Error",
+            };
+            let retry_after = if *status == 429 {
+                "Retry-After: 7\r\n"
+            } else {
+                ""
+            };
+            let response = format!("HTTP/1.1 {status} {reason}\r\n{retry_after}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}", reply.len());
             stream.write_all(response.as_bytes()).unwrap();
             requests.push(String::from_utf8(request).unwrap());
         }
@@ -591,6 +612,146 @@ fn set_default_outputs_json_when_json_is_requested() {
 }
 
 #[test]
+fn rename_moves_named_profile_secrets_and_preserves_default_selection() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let old_credentials = sandbox
+        .store()
+        .join("profile-616c696365-client-credentials.json");
+    let old_token = sandbox.store().join("profile-616c696365-oauth-token.json");
+    let new_credentials = sandbox
+        .store()
+        .join("profile-6361726f6c-client-credentials.json");
+    let new_token = sandbox.store().join("profile-6361726f6c-oauth-token.json");
+    let credentials = std::fs::read_to_string(&old_credentials).unwrap();
+    let token = std::fs::read_to_string(&old_token).unwrap();
+
+    let renamed = sandbox.run(&["--json", "profile", "rename", "alice", "carol"]);
+    assert!(
+        renamed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&renamed.stderr)
+    );
+    let output: serde_json::Value = serde_json::from_slice(&renamed.stdout).unwrap();
+    assert_eq!(
+        output,
+        serde_json::json!({"oldProfile": "alice", "newProfile": "carol", "defaultProfile": "carol"})
+    );
+
+    let status = sandbox.run(&["--json", "status"]);
+    let body: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(body["defaultProfile"], "carol");
+    assert_eq!(body["profiles"][0]["name"], "carol");
+    assert_eq!(body["profiles"][0]["legacyContext"], false);
+    assert_eq!(body["profiles"][1]["name"], "bob");
+    assert_eq!(
+        std::fs::read_to_string(&new_credentials).unwrap(),
+        credentials
+    );
+    assert_eq!(std::fs::read_to_string(&new_token).unwrap(), token);
+    assert!(!old_credentials.exists());
+    assert!(!old_token.exists());
+}
+
+#[test]
+fn rename_preserves_legacy_profile_secret_keys() {
+    let sandbox = Sandbox::new();
+    let credentials = r#"{"client_id":"legacy-id","client_secret":"legacy-secret","redirect_uri":"http://localhost:12345/callback"}"#;
+    let token = r#"{"access_token":"legacy-token","refresh_token":"legacy-refresh","token_type":"Bearer","expires_at":4102444800}"#;
+    let credentials_path = sandbox.store().join("client-credentials.json");
+    let token_path = sandbox.store().join("oauth-token.json");
+    std::fs::write(&credentials_path, credentials).unwrap();
+    std::fs::write(&token_path, token).unwrap();
+
+    let renamed = sandbox.run(&["profile", "rename", "default", "personal"]);
+    assert!(
+        renamed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&renamed.stderr)
+    );
+    let registry: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(sandbox.store().join("profiles.json")).unwrap())
+            .unwrap();
+    assert_eq!(registry["defaultProfile"], "personal");
+    assert_eq!(registry["profiles"][0]["name"], "personal");
+    assert_eq!(registry["profiles"][0]["legacy"], true);
+    assert_eq!(
+        std::fs::read_to_string(credentials_path).unwrap(),
+        credentials
+    );
+    assert_eq!(std::fs::read_to_string(token_path).unwrap(), token);
+    let status = sandbox.run(&["--json", "status"]);
+    let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status["profiles"][0]["name"], "personal");
+    assert_eq!(status["profiles"][0]["loggedIn"], true);
+    assert_eq!(status["profiles"][0]["hasStoredCredentials"], true);
+    assert!(!sandbox
+        .store()
+        .join("profile-706572736f6e616c-client-credentials.json")
+        .exists());
+}
+
+#[test]
+fn rename_refuses_an_existing_profile_name_without_changing_any_storage() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let registry_path = sandbox.store().join("profiles.json");
+    let registry_before = std::fs::read(&registry_path).unwrap();
+    let alice_credentials_path = sandbox
+        .store()
+        .join("profile-616c696365-client-credentials.json");
+    let alice_token_path = sandbox.store().join("profile-616c696365-oauth-token.json");
+    let credentials_before = std::fs::read(&alice_credentials_path).unwrap();
+    let token_before = std::fs::read(&alice_token_path).unwrap();
+
+    let renamed = sandbox.run(&["profile", "rename", "alice", "bob"]);
+    assert!(!renamed.status.success());
+    assert!(String::from_utf8_lossy(&renamed.stderr).contains("already exists"));
+    assert_eq!(std::fs::read(registry_path).unwrap(), registry_before);
+    assert_eq!(
+        std::fs::read(alice_credentials_path).unwrap(),
+        credentials_before
+    );
+    assert_eq!(std::fs::read(alice_token_path).unwrap(), token_before);
+}
+
+#[test]
+fn rename_refuses_orphan_destination_secrets_without_changing_source() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let registry_path = sandbox.store().join("profiles.json");
+    let registry_before = std::fs::read(&registry_path).unwrap();
+    let source_credentials = sandbox
+        .store()
+        .join("profile-616c696365-client-credentials.json");
+    let source_token = sandbox.store().join("profile-616c696365-oauth-token.json");
+    let credentials_before = std::fs::read(&source_credentials).unwrap();
+    let token_before = std::fs::read(&source_token).unwrap();
+    let destination_token = sandbox.store().join("profile-6361726f6c-oauth-token.json");
+    let orphan_token = r#"{"access_token":"orphan-token","expires_at":4102444800}"#;
+    std::fs::write(&destination_token, orphan_token).unwrap();
+
+    let renamed = sandbox.run(&["profile", "rename", "alice", "carol"]);
+    assert!(!renamed.status.success());
+    assert!(String::from_utf8_lossy(&renamed.stderr)
+        .contains("storage for the new name already exists"));
+    assert_eq!(std::fs::read(registry_path).unwrap(), registry_before);
+    assert_eq!(
+        std::fs::read(source_credentials).unwrap(),
+        credentials_before
+    );
+    assert_eq!(std::fs::read(source_token).unwrap(), token_before);
+    assert!(!sandbox
+        .store()
+        .join("profile-6361726f6c-client-credentials.json")
+        .exists());
+    assert_eq!(
+        std::fs::read_to_string(destination_token).unwrap(),
+        orphan_token
+    );
+}
+
+#[test]
 fn logout_requires_selection_with_multiple_profiles_and_only_clears_selected_profile() {
     let sandbox = Sandbox::new();
     sandbox.configured_pair();
@@ -685,6 +846,793 @@ fn accounts_uses_the_selected_profiles_access_token() {
     assert!(request
         .to_ascii_lowercase()
         .contains("authorization: bearer bob-token"));
+}
+
+#[test]
+fn accounts_all_profiles_deduplicates_shared_accounts_and_labels_profiles() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let alice_accounts = r#"{"accounts":[
+        {"key":"SHARED-KEY","name":"Shared account","accountNumber":"11112222333","balance":100.0},
+        {"key":"ALICE-KEY","name":"Alice account","accountNumber":"22223333444","balance":200.0}
+    ]}"#;
+    let bob_accounts = r#"{"accounts":[
+        {"key":"SHARED-KEY","name":"Shared account","accountNumber":"11112222333","balance":100.0},
+        {"key":"BOB-KEY","name":"Bob account","accountNumber":"33334444555","balance":300.0}
+    ]}"#;
+    let replies: &'static [&'static str] =
+        Box::leak(vec![alice_accounts, bob_accounts].into_boxed_slice());
+    let (url, requests) = fake_bank_sequence(replies);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "accounts", "--all"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], true);
+    assert_eq!(body["profiles"], serde_json::json!(["alice", "bob"]));
+    let aggregate_accounts = body["accounts"].as_array().unwrap();
+    assert_eq!(aggregate_accounts.len(), 3);
+    assert_eq!(aggregate_accounts[0]["key"], "SHARED-KEY");
+    assert_eq!(
+        aggregate_accounts[0]["profiles"],
+        serde_json::json!(["alice", "bob"])
+    );
+    assert_eq!(aggregate_accounts[0]["shared"], true);
+    assert_eq!(aggregate_accounts[1]["key"], "ALICE-KEY");
+    assert_eq!(
+        aggregate_accounts[1]["profiles"],
+        serde_json::json!(["alice"])
+    );
+    assert_eq!(aggregate_accounts[2]["key"], "BOB-KEY");
+    assert_eq!(
+        aggregate_accounts[2]["profiles"],
+        serde_json::json!(["bob"])
+    );
+
+    let requests = requests.join().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0].starts_with("GET /personal/banking/accounts?"));
+    assert!(requests[1].starts_with("GET /personal/banking/accounts?"));
+    for request in &requests {
+        let request = request.to_ascii_lowercase();
+        assert!(request.contains("includecreditcardaccounts=true"));
+        assert!(request.contains("includebsuaccounts=true"));
+        assert!(request.contains("includeaskaccounts=true"));
+        assert!(request.contains("includepensionaccounts=true"));
+        assert!(request.contains("includecurrencyaccounts=true"));
+    }
+    assert!(requests[0]
+        .to_ascii_lowercase()
+        .contains("authorization: bearer alice-token"));
+    assert!(requests[1]
+        .to_ascii_lowercase()
+        .contains("authorization: bearer bob-token"));
+}
+
+#[test]
+fn accounts_all_profiles_marks_partial_failure_and_returns_available_data() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let alice_accounts = r#"{"accounts":[{"key":"ALICE-KEY","name":"Alice account"}]}"#;
+    let bob_invalid_json = "not-json";
+    let replies: &'static [&'static str] =
+        Box::leak(vec![alice_accounts, bob_invalid_json].into_boxed_slice());
+    let (url, requests) = fake_bank_sequence(replies);
+    let result = sandbox
+        .command(&["--json", "accounts", "--all-profiles"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+
+    assert!(result.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], false);
+    assert_eq!(body["profiles"], serde_json::json!(["alice", "bob"]));
+    assert_eq!(body["accounts"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        body["accounts"][0]["profiles"],
+        serde_json::json!(["alice"])
+    );
+    assert_eq!(body["errors"][0]["profile"], "bob");
+    assert!(String::from_utf8_lossy(&result.stderr).contains("aggregate incomplete"));
+    assert_eq!(requests.join().unwrap().len(), 2);
+}
+
+#[test]
+fn accounts_all_profiles_stops_listing_profiles_after_rate_limit() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let responses: &'static [(u16, &'static str)] =
+        Box::leak(vec![(429, r#"{"error":"rate limited"}"#)].into_boxed_slice());
+    let (url, requests) = fake_bank_status_sequence(responses);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "accounts"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+
+    assert!(result.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], false);
+    assert_eq!(body["errors"].as_array().unwrap().len(), 1);
+    assert_eq!(body["errors"][0]["profile"], "alice");
+    assert_eq!(body["errors"][0]["retryAfterSeconds"], 7);
+    assert_eq!(requests.join().unwrap().len(), 1);
+}
+
+#[test]
+fn accounts_all_profiles_marks_profile_without_token_incomplete() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    std::fs::remove_file(sandbox.store().join("profile-626f62-oauth-token.json")).unwrap();
+    let accounts = r#"{"accounts":[{"key":"ALICE-KEY","name":"Alice account"}]}"#;
+    let replies: &'static [&'static str] = Box::leak(vec![accounts].into_boxed_slice());
+    let (url, requests) = fake_bank_sequence(replies);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "accounts"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+
+    assert!(result.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], false);
+    assert_eq!(body["errors"][0]["profile"], "bob");
+    assert_eq!(body["accounts"].as_array().unwrap().len(), 1);
+    assert_eq!(requests.join().unwrap().len(), 1);
+}
+
+#[test]
+fn transactions_all_profiles_fetches_each_unique_account_once_and_labels_rows() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let alice_accounts = r#"{"accounts":[
+        {"key":"SHARED-KEY","name":"Shared account"},
+        {"key":"ALICE-KEY","name":"Alice account"}
+    ]}"#;
+    let bob_accounts = r#"{"accounts":[
+        {"key":"SHARED-KEY","name":"Shared account"},
+        {"key":"BOB-KEY","name":"Bob account"}
+    ]}"#;
+    let shared_txns =
+        r#"{"transactions":[{"id":"shared-txn","amount":10,"accountName":"Shared account"}]}"#;
+    let alice_txns =
+        r#"{"transactions":[{"id":"alice-txn","amount":20,"accountName":"Alice account"}]}"#;
+    let bob_txns = r#"{"transactions":[{"id":"bob-txn","amount":30,"accountName":"Bob account"}]}"#;
+    let replies: &'static [&'static str] = Box::leak(
+        vec![
+            alice_accounts,
+            bob_accounts,
+            shared_txns,
+            alice_txns,
+            bob_txns,
+        ]
+        .into_boxed_slice(),
+    );
+    let (url, requests) = fake_bank_sequence(replies);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "transactions", "--days", "30"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], true);
+    let txns = body["transactions"].as_array().unwrap();
+    assert_eq!(txns.len(), 3);
+    assert_eq!(txns[0]["id"], "shared-txn");
+    assert_eq!(txns[0]["profile"], "alice");
+    assert_eq!(txns[1]["profile"], "alice");
+    assert_eq!(txns[2]["profile"], "bob");
+    let requests = requests.join().unwrap();
+    assert_eq!(requests.len(), 5);
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.starts_with("GET /personal/banking/transactions?"))
+            .count(),
+        3
+    );
+    assert!(requests
+        .iter()
+        .any(|request| request.contains("accountKey=SHARED-KEY")));
+}
+
+#[test]
+fn transactions_all_profiles_falls_back_to_another_profile_for_a_shared_account() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let accounts = r#"{"accounts":[{"key":"SHARED-KEY","name":"Shared account"}]}"#;
+    let txn = r#"{"transactions":[{"id":"shared-txn","amount":10}]}"#;
+    let responses: &'static [(u16, &'static str)] = Box::leak(
+        vec![
+            (200, accounts),
+            (200, accounts),
+            (403, r#"{"error":"account not accessible"}"#),
+            (200, txn),
+        ]
+        .into_boxed_slice(),
+    );
+    let (url, requests) = fake_bank_status_sequence(responses);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "transactions", "Shared account"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+
+    assert!(result.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], false);
+    assert_eq!(body["errors"][0]["profile"], "alice");
+    assert_eq!(body["transactions"][0]["id"], "shared-txn");
+    assert_eq!(body["transactions"][0]["profile"], "bob");
+    let requests = requests.join().unwrap();
+    assert_eq!(requests.len(), 4);
+    assert!(requests[2]
+        .to_ascii_lowercase()
+        .contains("authorization: bearer alice-token"));
+    assert!(requests[3]
+        .to_ascii_lowercase()
+        .contains("authorization: bearer bob-token"));
+}
+
+#[test]
+fn transactions_all_profiles_stops_fallback_after_rate_limit() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let accounts = r#"{"accounts":[{"key":"SHARED-KEY","name":"Shared account"}]}"#;
+    let responses: &'static [(u16, &'static str)] = Box::leak(
+        vec![
+            (200, accounts),
+            (200, accounts),
+            (429, r#"{"error":"rate limited"}"#),
+        ]
+        .into_boxed_slice(),
+    );
+    let (url, requests) = fake_bank_status_sequence(responses);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "transactions", "Shared account"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+
+    assert!(result.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], false);
+    assert_eq!(body["errors"].as_array().unwrap().len(), 1);
+    assert_eq!(body["errors"][0]["profile"], "alice");
+    assert!(body["errors"][0]["error"]
+        .as_str()
+        .unwrap()
+        .contains("rate limited"));
+    assert_eq!(requests.join().unwrap().len(), 3);
+}
+
+#[test]
+fn transactions_all_profiles_stops_processing_accounts_after_rate_limit() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let accounts =
+        r#"{"accounts":[{"key":"A","name":"Account A"},{"key":"B","name":"Account B"}]}"#;
+    let responses: &'static [(u16, &'static str)] = Box::leak(
+        vec![
+            (200, accounts),
+            (200, accounts),
+            (429, r#"{"error":"rate limited"}"#),
+        ]
+        .into_boxed_slice(),
+    );
+    let (url, requests) = fake_bank_status_sequence(responses);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "transactions"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+
+    assert!(result.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], false);
+    assert_eq!(body["errors"].as_array().unwrap().len(), 1);
+    assert_eq!(body["errors"][0]["retryAfterSeconds"], 7);
+    assert_eq!(requests.join().unwrap().len(), 3);
+}
+
+#[test]
+fn hello_all_profiles_reports_each_profile_result() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let replies: &'static [&'static str] = Box::leak(
+        vec![r#"{"message":"hello alice"}"#, r#"{"message":"hello bob"}"#].into_boxed_slice(),
+    );
+    let (url, requests) = fake_bank_sequence(replies);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "hello"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], true);
+    assert_eq!(body["results"][0]["profile"], "alice");
+    assert_eq!(body["results"][0]["message"], "hello alice");
+    assert_eq!(body["results"][1]["profile"], "bob");
+    assert_eq!(requests.join().unwrap().len(), 2);
+}
+
+#[test]
+fn hello_all_profiles_stops_checking_profiles_after_rate_limit() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let responses: &'static [(u16, &'static str)] =
+        Box::leak(vec![(429, r#"{"error":"rate limited"}"#)].into_boxed_slice());
+    let (url, requests) = fake_bank_status_sequence(responses);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "hello"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+
+    assert!(result.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], false);
+    assert_eq!(body["errors"].as_array().unwrap().len(), 1);
+    assert_eq!(body["errors"][0]["profile"], "alice");
+    assert_eq!(body["errors"][0]["retryAfterSeconds"], 7);
+    assert_eq!(requests.join().unwrap().len(), 1);
+}
+
+#[test]
+fn account_all_profiles_uses_one_source_profile_and_labels_shared_result() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let accounts = r#"{"accounts":[{"key":"SHARED-KEY","name":"Shared account"}]}"#;
+    let detail = r#"{"key":"SHARED-KEY","name":"Shared account","balance":100}"#;
+    let replies: &'static [&'static str] =
+        Box::leak(vec![accounts, accounts, detail].into_boxed_slice());
+    let (url, requests) = fake_bank_sequence(replies);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "account", "Shared account"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(
+        body["account"]["profiles"],
+        serde_json::json!(["alice", "bob"])
+    );
+    assert_eq!(body["account"]["shared"], true);
+    let requests = requests.join().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.starts_with("GET /personal/banking/accounts/SHARED-KEY "))
+            .count(),
+        1
+    );
+    assert!(requests[2]
+        .to_ascii_lowercase()
+        .contains("authorization: bearer alice-token"));
+}
+
+#[test]
+fn balance_all_profiles_resolves_shared_account_and_queries_it_once() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let accounts = r#"{"accounts":[{"key":"SHARED-KEY","name":"Shared account","accountNumber":"11112222333"}]}"#;
+    let balance = r#"{"accountNumber":"11112222333","balance":100}"#;
+    let replies: &'static [&'static str] =
+        Box::leak(vec![accounts, accounts, balance].into_boxed_slice());
+    let (url, requests) = fake_bank_sequence(replies);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "balance", "1111.22.22333"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], true);
+    assert_eq!(body["balance"]["balance"], 100);
+    assert_eq!(body["profiles"], serde_json::json!(["alice", "bob"]));
+    let requests = requests.join().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[2].starts_with("POST /personal/banking/accounts/balance "));
+    assert!(requests[2]
+        .to_ascii_lowercase()
+        .contains("authorization: bearer alice-token"));
+}
+
+#[test]
+fn balance_all_profiles_falls_back_to_another_profile_for_a_shared_account() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let accounts = r#"{"accounts":[{"key":"SHARED-KEY","name":"Shared account","accountNumber":"11112222333"}]}"#;
+    let responses: &'static [(u16, &'static str)] = Box::leak(
+        vec![
+            (200, accounts),
+            (200, accounts),
+            (403, r#"{"error":"account not accessible"}"#),
+            (200, r#"{"accountNumber":"11112222333","balance":100}"#),
+        ]
+        .into_boxed_slice(),
+    );
+    let (url, requests) = fake_bank_status_sequence(responses);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "balance", "11112222333"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+
+    assert!(result.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], false);
+    assert_eq!(body["errors"][0]["profile"], "alice");
+    assert_eq!(body["balance"]["balance"], 100);
+    assert_eq!(body["queriedBy"], "bob");
+    let requests = requests.join().unwrap();
+    assert_eq!(requests.len(), 4);
+    assert!(requests[3]
+        .to_ascii_lowercase()
+        .contains("authorization: bearer bob-token"));
+}
+
+#[test]
+fn balance_all_profiles_skips_balance_request_after_profile_list_rate_limit() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let accounts = r#"{"accounts":[{"key":"SHARED-KEY","name":"Shared account","accountNumber":"11112222333"}]}"#;
+    let responses: &'static [(u16, &'static str)] =
+        Box::leak(vec![(200, accounts), (429, r#"{"error":"rate limited"}"#)].into_boxed_slice());
+    let (url, requests) = fake_bank_status_sequence(responses);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "balance", "11112222333"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+
+    assert!(result.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], false);
+    assert_eq!(body["balance"], serde_json::Value::Null);
+    assert_eq!(body["queriedBy"], serde_json::Value::Null);
+    assert_eq!(body["errors"][0]["retryAfterSeconds"], 7);
+    assert_eq!(requests.join().unwrap().len(), 2);
+}
+
+#[test]
+fn transaction_details_all_profiles_groups_identical_matches_by_profile() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let detail = r#"{"id":"txn-1","amount":-50,"description":"Coffee"}"#;
+    let replies: &'static [&'static str] = Box::leak(vec![detail, detail].into_boxed_slice());
+    let (url, requests) = fake_bank_sequence(replies);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "transaction", "txn-1"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["matches"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        body["matches"][0]["profiles"],
+        serde_json::json!(["alice", "bob"])
+    );
+    assert_eq!(requests.join().unwrap().len(), 2);
+}
+
+#[test]
+fn transaction_details_all_profiles_stops_searching_after_rate_limit() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let responses: &'static [(u16, &'static str)] =
+        Box::leak(vec![(429, r#"{"error":"rate limited"}"#)].into_boxed_slice());
+    let (url, requests) = fake_bank_status_sequence(responses);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "transaction", "txn-1"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+
+    assert!(result.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], false);
+    assert_eq!(body["matches"].as_array().unwrap().len(), 0);
+    assert_eq!(body["errors"].as_array().unwrap().len(), 1);
+    assert_eq!(body["errors"][0]["retryAfterSeconds"], 7);
+    assert_eq!(requests.join().unwrap().len(), 1);
+}
+
+#[test]
+fn export_all_profiles_adds_source_profile_to_csv() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let accounts = r#"{"accounts":[{"key":"SHARED-KEY","name":"Shared account","accountNumber":"11112222333"}]}"#;
+    let csv = "date,amount,description\n2026-01-01,-10.00,Coffee\n";
+    let replies: &'static [&'static str] =
+        Box::leak(vec![accounts, accounts, csv].into_boxed_slice());
+    let (url, requests) = fake_bank_sequence(replies);
+    let result = sandbox
+        .command(&["--all-profiles", "export", "--account", "Shared account"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let mut reader = csv::Reader::from_reader(result.stdout.as_slice());
+    assert_eq!(
+        reader.headers().unwrap().iter().collect::<Vec<_>>(),
+        ["profile", "date", "amount", "description"]
+    );
+    let row = reader.records().next().unwrap().unwrap();
+    assert_eq!(&row[0], "alice");
+    assert_eq!(&row[3], "Coffee");
+    let requests = requests.join().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[2].starts_with("GET /personal/banking/transactions/export?"));
+    assert!(requests[2].contains("accountKey=SHARED-KEY"));
+}
+
+#[test]
+fn export_all_profiles_falls_back_when_first_profile_cannot_export_account() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let accounts = r#"{"accounts":[{"key":"SHARED-KEY","name":"Shared account","accountNumber":"11112222333"}]}"#;
+    let csv = "date;description\n2026-01-01;Coffee\n";
+    let responses: &'static [(u16, &'static str)] = Box::leak(
+        vec![
+            (200, accounts),
+            (200, accounts),
+            (403, r#"{"error":"account not accessible"}"#),
+            (200, csv),
+        ]
+        .into_boxed_slice(),
+    );
+    let (url, requests) = fake_bank_status_sequence(responses);
+    let result = sandbox
+        .command(&["--all-profiles", "export", "--account", "Shared account"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+
+    assert!(result.status.success());
+    assert_eq!(
+        String::from_utf8(result.stdout).unwrap(),
+        "profile;date;description\nbob;2026-01-01;Coffee\n"
+    );
+    let requests = requests.join().unwrap();
+    assert_eq!(requests.len(), 4);
+    assert!(requests[2]
+        .to_ascii_lowercase()
+        .contains("authorization: bearer alice-token"));
+    assert!(requests[3]
+        .to_ascii_lowercase()
+        .contains("authorization: bearer bob-token"));
+}
+
+#[test]
+fn summary_all_profiles_counts_shared_account_once_and_labels_coverage() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let alice_accounts = r#"{"accounts":[
+        {"key":"SHARED-KEY","name":"Shared account","accountNumber":"11112222333","balance":100},
+        {"key":"ALICE-KEY","name":"Alice account","accountNumber":"22223333444","balance":200}
+    ]}"#;
+    let bob_accounts = r#"{"accounts":[
+        {"key":"SHARED-KEY","name":"Shared account","accountNumber":"11112222333","balance":100},
+        {"key":"BOB-KEY","name":"Bob account","accountNumber":"33334444555","balance":300}
+    ]}"#;
+    let shared = r#"{"transactions":[{"transaction":{"id":"shared-txn","amount":-10}}]}"#;
+    let alice = r#"{"transactions":[{"transaction":{"id":"alice-txn","amount":500}}]}"#;
+    let bob = r#"{"transactions":[{"transaction":{"id":"bob-txn","amount":-100}}]}"#;
+    let replies: &'static [&'static str] =
+        Box::leak(vec![alice_accounts, bob_accounts, shared, alice, bob].into_boxed_slice());
+    let (url, requests) = fake_bank_sequence(replies);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "summary", "--months", "1"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], true);
+    assert_eq!(body["profiles"], serde_json::json!(["alice", "bob"]));
+    assert_eq!(body["netWorth"]["NOK"], 600.0);
+    assert_eq!(body["income"], 500.0);
+    assert_eq!(body["spending"], -110.0);
+    let requests = requests.join().unwrap();
+    assert_eq!(requests.len(), 5);
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.starts_with("GET /personal/banking/transactions/classified?"))
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn summary_all_profiles_uses_an_accessible_fallback_for_a_shared_account() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let accounts = r#"{"accounts":[{"key":"SHARED-KEY","name":"Shared account","accountNumber":"11112222333","balance":100}]}"#;
+    let transactions = r#"{"transactions":[{"transaction":{"id":"shared-txn","amount":10}}]}"#;
+    let unavailable = r#"{"error":"account not accessible"}"#;
+    let responses: &'static [(u16, &'static str)] = Box::leak(
+        vec![
+            (200, accounts),
+            (200, accounts),
+            (404, unavailable),
+            (403, unavailable),
+            (200, transactions),
+        ]
+        .into_boxed_slice(),
+    );
+    let (url, requests) = fake_bank_status_sequence(responses);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "summary", "--months", "1"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+
+    assert!(result.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], false);
+    assert_eq!(body["errors"][0]["profile"], "alice");
+    assert_eq!(body["netWorth"]["NOK"], 100.0);
+    assert_eq!(body["income"], 10.0);
+    let requests = requests.join().unwrap();
+    assert_eq!(requests.len(), 5);
+    assert!(requests[4]
+        .to_ascii_lowercase()
+        .contains("authorization: bearer bob-token"));
+}
+
+#[test]
+fn summary_all_profiles_does_not_retry_or_fallback_after_rate_limit() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let accounts = r#"{"accounts":[{"key":"SHARED-KEY","name":"Shared account","accountNumber":"11112222333","balance":100}]}"#;
+    let responses: &'static [(u16, &'static str)] = Box::leak(
+        vec![
+            (200, accounts),
+            (200, accounts),
+            (429, r#"{"error":"rate limited"}"#),
+        ]
+        .into_boxed_slice(),
+    );
+    let (url, requests) = fake_bank_status_sequence(responses);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "summary", "--months", "1"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+
+    assert!(result.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], false);
+    assert_eq!(body["errors"].as_array().unwrap().len(), 1);
+    assert_eq!(body["errors"][0]["profile"], "alice");
+    assert!(body["errors"][0]["error"]
+        .as_str()
+        .unwrap()
+        .contains("rate limited"));
+    assert_eq!(requests.join().unwrap().len(), 3);
+}
+
+#[test]
+fn summary_all_profiles_stops_after_rate_limit_on_plain_fallback() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let accounts = r#"{"accounts":[{"key":"A","name":"Account A","accountNumber":"11112222333","balance":100},{"key":"B","name":"Account B","accountNumber":"22223333444","balance":200}]}"#;
+    let responses: &'static [(u16, &'static str)] = Box::leak(
+        vec![
+            (200, accounts),
+            (200, accounts),
+            (404, r#"{"error":"classified unavailable"}"#),
+            (429, r#"{"error":"rate limited"}"#),
+        ]
+        .into_boxed_slice(),
+    );
+    let (url, requests) = fake_bank_status_sequence(responses);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "summary", "--months", "1"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+
+    assert!(result.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], false);
+    assert_eq!(body["errors"].as_array().unwrap().len(), 1);
+    assert_eq!(body["errors"][0]["retryAfterSeconds"], 7);
+    assert_eq!(body["netWorth"]["NOK"], 300.0);
+    assert_eq!(requests.join().unwrap().len(), 4);
+}
+
+#[test]
+fn summary_all_profiles_stops_processing_accounts_after_rate_limit() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let accounts = r#"{"accounts":[{"key":"A","name":"Account A","accountNumber":"11112222333","balance":100},{"key":"B","name":"Account B","accountNumber":"22223333444","balance":200}]}"#;
+    let responses: &'static [(u16, &'static str)] = Box::leak(
+        vec![
+            (200, accounts),
+            (200, accounts),
+            (429, r#"{"error":"rate limited"}"#),
+        ]
+        .into_boxed_slice(),
+    );
+    let (url, requests) = fake_bank_status_sequence(responses);
+    let result = sandbox
+        .command(&["--json", "--all-profiles", "summary", "--months", "1"])
+        .env("SB1_TEST_API_BASE_URL", url)
+        .output()
+        .unwrap();
+
+    assert!(result.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["complete"], false);
+    assert_eq!(body["errors"].as_array().unwrap().len(), 1);
+    assert_eq!(body["errors"][0]["retryAfterSeconds"], 7);
+    assert_eq!(body["netWorth"]["NOK"], 300.0);
+    assert_eq!(requests.join().unwrap().len(), 3);
+}
+
+#[test]
+fn all_profiles_is_rejected_for_unsupported_commands() {
+    let sandbox = Sandbox::new();
+    let unsupported_commands: &[&[&str]] = &[
+        &["--all-profiles", "status"],
+        &["--all-profiles", "login"],
+        &["--all-profiles", "logout"],
+        &["--all-profiles", "refresh"],
+        &["--all-profiles", "profile", "set-default", "alice"],
+        &[
+            "--all-profiles",
+            "transfer",
+            "debit",
+            "--from",
+            "Checking",
+            "--to",
+            "Savings",
+            "--amount",
+            "250",
+        ],
+    ];
+    for args in unsupported_commands {
+        let result = sandbox.run(args);
+        assert!(!result.status.success(), "unexpectedly accepted {args:?}");
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains("only supported for read-only"),
+            "unexpected error for {args:?}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
 }
 
 #[test]

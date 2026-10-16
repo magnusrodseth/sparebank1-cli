@@ -16,15 +16,18 @@ sb1 accounts                      # list (name, number, balance, currency, key)
 sb1 accounts --all                # also include cards/BSU/ASK/pension/currency
 sb1 --json accounts               # machine-readable
 sb1 accounts --profile <profile-name>  # select another local profile
+sb1 accounts --all-profiles       # combine all profiles; shared accounts once
 ```
 
 Individual account (by name, key, or number):
 
 ```bash
 sb1 account Brukskonto            # summary
+sb1 account Brukskonto --all-profiles # combined read-only lookup
 sb1 account Brukskonto --details  # extended details (JSON)
 sb1 account Brukskonto --roles    # roles (JSON)
 sb1 balance 1234.56.78903         # balance via account number (POST /accounts/balance)
+sb1 balance 1234.56.78903 --all-profiles
 ```
 
 ## Transactions
@@ -32,6 +35,7 @@ sb1 balance 1234.56.78903         # balance via account number (POST /accounts/b
 ```bash
 # Last 30 days for one account
 sb1 transactions -a Brukskonto --days 30
+sb1 transactions --all-profiles --days 30 # combined; shared accounts queried once
 
 # Explicit range, multiple accounts
 sb1 transactions -a Brukskonto -a Sparekonto --from 2026-01-01 --to 2026-03-31
@@ -51,12 +55,14 @@ Single transaction details (id comes from a `transactions` listing):
 ```bash
 sb1 transaction <id>              # details (JSON)
 sb1 transaction <id> --classified
+sb1 transaction <id> --all-profiles  # look for the temporary API id in each profile
 ```
 
 ## CSV export (server-rendered)
 
 ```bash
 sb1 export -a Brukskonto --from 2026-05-01 --to 2026-06-16 -o booked.csv
+sb1 export -a Brukskonto --all-profiles -o booked.csv
 ```
 
 `export` returns the bank's native semicolon-delimited CSV (Norwegian headers:
@@ -68,6 +74,7 @@ analysis prefer `transactions --json` or `transactions --csv` instead.
 ```bash
 sb1 summary --months 6        # net worth, monthly cash flow, categories, subs
 sb1 --json summary --months 6 # machine-readable
+sb1 summary --months 6 --all-profiles # aggregate household-level view
 ```
 
 `summary` is generalizable across any account setup: net worth per currency,
@@ -76,10 +83,16 @@ excluded), monthly breakdown, spending by **bank-assigned category**, top
 counterparties, and bank-flagged subscriptions. Prefer this over hand-rolled
 analysis.
 
-Read commands use the default profile unless `--profile <profile-name>` is supplied.
-Every account, balance, transaction, detail lookup, export, and summary request
-in phase 1 is scoped to that one profile. `accounts --all` includes account
-types within the selected profile; it does not combine profiles.
+Read commands use the default profile unless `--profile <profile-name>` or
+`--all-profiles` is supplied. Aggregate views deduplicate accounts by bank
+account key, count shared accounts once in summaries, and label transaction and
+export rows with the profile used to fetch them. The API transaction id is a
+temporary lookup value; use `transaction <id> --all-profiles` to search each
+configured profile. Aggregate JSON includes `complete` and `errors`; check them
+before relying on results. For table and CSV output, partial failures are
+reported on stderr. `--profile` and `--all-profiles` cannot be combined. Use
+`accounts --all` for all account types in one profile; aggregate account lists
+include all account types by default.
 
 ## Manual analysis pattern
 

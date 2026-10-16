@@ -1,6 +1,6 @@
 //! Local profile registry. It contains labels and storage references, never secrets.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::secrets;
@@ -127,6 +127,28 @@ impl Registry {
         Ok(())
     }
 
+    fn rename(&mut self, old_name: &str, new_name: &str) -> Result<Profile> {
+        validate_name(new_name)?;
+        let old = self.get(old_name)?;
+        if old_name == new_name {
+            return Ok(old);
+        }
+        if self.get_optional(new_name).is_some() {
+            bail!("profile '{new_name}' already exists");
+        }
+
+        let profile = self
+            .profiles
+            .iter_mut()
+            .find(|profile| profile.name == old_name)
+            .expect("profile was found above");
+        profile.name = new_name.to_owned();
+        if self.default_profile.as_deref() == Some(old_name) {
+            self.default_profile = Some(new_name.to_owned());
+        }
+        Ok(old)
+    }
+
     pub fn get_optional(&self, name: &str) -> Option<Profile> {
         self.profiles.iter().find(|p| p.name == name).cloned()
     }
@@ -142,6 +164,42 @@ impl Registry {
         }
         Ok(())
     }
+}
+
+/// Rename a profile while holding the registry lock through secret migration.
+/// Legacy profiles keep their original name-independent secret keys.
+pub fn rename_profile(old_name: &str, new_name: &str) -> Result<Option<String>> {
+    validate_name(new_name)?;
+    let _lock = secrets::lock_profiles()?;
+    let mut registry = Registry::load_locked()?;
+    let old_profile = registry.rename(old_name, new_name)?;
+    if old_name == new_name {
+        return Ok(None);
+    }
+
+    let new_profile = registry.get(new_name)?;
+    if !old_profile.legacy {
+        secrets::copy_profile_secrets(&old_profile, &new_profile)
+            .context("copying profile secrets for rename")?;
+    }
+
+    if let Err(error) = registry.save() {
+        if !old_profile.legacy {
+            if let Err(cleanup) = secrets::delete_profile_secrets(&new_profile) {
+                bail!(
+                    "saving renamed profile failed: {error}; destination cleanup failed: {cleanup}"
+                );
+            }
+        }
+        return Err(error).context("saving renamed profile");
+    }
+
+    if !old_profile.legacy {
+        if let Err(error) = secrets::delete_profile_secrets(&old_profile) {
+            return Ok(Some(error.to_string()));
+        }
+    }
+    Ok(None)
 }
 
 pub fn validate_name(name: &str) -> Result<()> {

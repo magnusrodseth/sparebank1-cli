@@ -191,6 +191,63 @@ fn kv_delete(account: &str) -> Result<()> {
     }
 }
 
+/// Copy a named profile's stored secrets to the keys derived from its new name.
+/// The caller updates the profile registry before deleting the old keys.
+pub(crate) fn copy_profile_secrets(
+    from: &crate::profiles::Profile,
+    to: &crate::profiles::Profile,
+) -> Result<()> {
+    let source = [
+        (from.credential_key(), to.credential_key()),
+        (from.token_key(), to.token_key()),
+    ];
+    let mut values = Vec::with_capacity(source.len());
+    for (old_key, new_key) in &source {
+        let value = kv_get(old_key)?;
+        if kv_get(new_key)?.is_some() {
+            return Err(crate::error::Sb1Error::AuthFlow(format!(
+                "cannot rename profile '{}': secret storage for the new name already exists",
+                to.name
+            )));
+        }
+        values.push((new_key, value));
+    }
+
+    let mut written: Vec<String> = Vec::new();
+    for (key, value) in values {
+        if let Some(value) = value {
+            if let Err(error) = kv_set(key, &value) {
+                let cleanup_error = written
+                    .iter()
+                    .filter_map(|written_key| kv_delete(written_key).err())
+                    .next();
+                let message = match cleanup_error {
+                    Some(cleanup) => format!(
+                        "copying profile secrets failed: {error}; partial destination cleanup failed: {cleanup}"
+                    ),
+                    None => format!("copying profile secrets failed: {error}"),
+                };
+                return Err(crate::error::Sb1Error::AuthFlow(message));
+            }
+            written.push(key.clone());
+        }
+    }
+    Ok(())
+}
+
+/// Remove both storage entries for a profile, attempting both even if one fails.
+pub(crate) fn delete_profile_secrets(profile: &crate::profiles::Profile) -> Result<()> {
+    let credentials = kv_delete(&profile.credential_key());
+    let token = kv_delete(&profile.token_key());
+    match (credentials, token) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(credentials), Err(token)) => Err(crate::error::Sb1Error::AuthFlow(format!(
+            "could not remove old credential and token entries: {credentials}; {token}"
+        ))),
+    }
+}
+
 // ---- 1Password (`op` CLI) backend --------------------------------------
 
 fn op_err(msg: impl std::fmt::Display) -> crate::error::Sb1Error {

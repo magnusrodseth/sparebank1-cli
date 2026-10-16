@@ -32,7 +32,9 @@ sb1 transfer debit --profile <profile-name> --from Brukskonto --to Sparekonto --
 With multiple configured profiles, every transfer must include `--profile`.
 The CLI resolves source and destination accounts through that profile and shows
 its name in the confirmation summary. Credit card and pension transfers also
-use only the selected profile's authenticated client.
+use only the selected profile's authenticated client. `--all-profiles` is not
+supported for transfers; aggregate account lists must never be used to choose
+transfer accounts.
 
 The CLI prints a summary and asks `Proceed? [y/N]`. Amounts accept `250`,
 `250.50`, or `250,50`. Optional `--due-date YYYY-MM-DD` schedules it.

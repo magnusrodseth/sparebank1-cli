@@ -1,6 +1,7 @@
 //! Command handlers and dispatch.
 
 pub mod accounts;
+pub mod aggregate;
 pub mod auth;
 pub mod summary;
 pub mod transactions;
@@ -100,6 +101,22 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     let mode = output_mode(&cli);
     let mask = cli.mask;
     let selected = cli.profile.as_deref();
+    let all_profiles = cli.all_profiles;
+    if all_profiles
+        && !matches!(
+            &cli.command,
+            Command::Hello
+                | Command::Accounts(_)
+                | Command::Account(_)
+                | Command::Balance { .. }
+                | Command::Transactions(_)
+                | Command::Transaction { .. }
+                | Command::Export(_)
+                | Command::Summary { .. }
+        )
+    {
+        anyhow::bail!("--all-profiles is only supported for read-only banking commands");
+    }
     match cli.command {
         Command::Profile { action } => match action {
             ProfileAction::SetDefault { name } => {
@@ -113,34 +130,47 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
                     Ok(())
                 }
             }
+            ProfileAction::Rename { old_name, new_name } => {
+                let cleanup_warning = crate::profiles::rename_profile(&old_name, &new_name)?;
+                let default_profile = crate::profiles::Registry::load()?.default_profile;
+                if mode == OutputMode::Json {
+                    crate::format::print_json(&serde_json::json!({
+                        "oldProfile": old_name,
+                        "newProfile": new_name,
+                        "defaultProfile": default_profile,
+                    }))?;
+                } else {
+                    println!("Renamed profile '{old_name}' to '{new_name}'.");
+                }
+                if let Some(warning) = cleanup_warning {
+                    eprintln!(
+                        "Warning: profile was renamed, but old secret entries could not be removed: {warning}"
+                    );
+                }
+                Ok(())
+            }
         },
         Command::Login(args) => auth::login(args, selected),
         Command::Logout { all } => auth::logout(all, selected),
         Command::Status => auth::status(mode, selected),
-        Command::Hello => auth::hello(selected),
+        Command::Hello => auth::hello(selected, all_profiles, mode),
         Command::Refresh => auth::refresh(selected),
-        Command::Accounts(args) => accounts::list(args, mode, mask, &read_profile(selected)?),
-        Command::Account(args) => accounts::show(args, mode, mask, &read_profile(selected)?),
+        Command::Accounts(args) => accounts::list(args, mode, mask, selected, all_profiles),
+        Command::Account(args) => accounts::show(args, mode, mask, selected, all_profiles),
         Command::Balance { account_number } => {
-            accounts::balance(account_number, &read_profile(selected)?)
+            accounts::balance(account_number, mode, mask, selected, all_profiles)
         }
-        Command::Transactions(args) => {
-            transactions::list(args, mode, mask, &read_profile(selected)?)
-        }
+        Command::Transactions(args) => transactions::list(args, mode, mask, selected, all_profiles),
         Command::Transaction { id, classified } => {
-            transactions::show(id, classified, &read_profile(selected)?)
+            transactions::show(id, classified, selected, all_profiles)
         }
-        Command::Export(args) => transactions::export(args, &read_profile(selected)?),
+        Command::Export(args) => transactions::export(args, selected, all_profiles),
         Command::Transfer { kind } => {
             let profile = crate::profiles::Registry::load()?.select(selected, true)?;
             transfer::run(kind, mode, &profile)
         }
-        Command::Summary { months } => summary::run(months, mode, mask, &read_profile(selected)?),
+        Command::Summary { months } => summary::run(months, mode, mask, selected, all_profiles),
     }
-}
-
-fn read_profile(selected: Option<&str>) -> anyhow::Result<crate::profiles::Profile> {
-    crate::profiles::Registry::load()?.select(selected, false)
 }
 
 #[cfg(test)]
