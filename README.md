@@ -313,6 +313,11 @@ Norwegian locale.
 The OpenAPI specs this client was built against are saved under
 [`docs/api/`](docs/api/).
 
+## Design documentation
+
+Read the [domain glossary](GLOSSARY.md) for terms and the
+[architecture decisions](docs/adr/README.md) for the design history and proposed extensions.
+
 ## Development
 
 ```bash
