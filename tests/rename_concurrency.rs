@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -13,6 +14,7 @@ const NEW_TOKEN: &str = "profile-6361726f6c-oauth-token.json";
 const TOKEN_REPLY: &str =
     r#"{"access_token":"synthetic-fresh","refresh_token":"synthetic-rotated","expires_in":3600}"#;
 static NEXT_SANDBOX_ID: AtomicU64 = AtomicU64::new(0);
+static CALLBACK_PORT_SETUP: Mutex<()> = Mutex::new(());
 
 struct Sandbox(PathBuf);
 
@@ -255,6 +257,9 @@ fn check_pending_reauthentication(change: ProfileChange) {
     )
     .unwrap();
     let bank = paused_bank(false);
+    // Keep concurrent login tests from choosing the same callback port between
+    // releasing the reservation and the child binding its listener.
+    let callback_setup = CALLBACK_PORT_SETUP.lock().unwrap();
     let reservation = TcpListener::bind("127.0.0.1:0").unwrap();
     let callback_port = reservation.local_addr().unwrap().port();
     drop(reservation);
@@ -289,6 +294,7 @@ fn check_pending_reauthentication(change: ProfileChange) {
         captured
     });
     let authorize = authorize_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    drop(callback_setup);
     let authorize = url::Url::parse(&authorize).unwrap();
     let state = authorize
         .query_pairs()
