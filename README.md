@@ -269,6 +269,12 @@ transaction and export rows include the profile used to fetch them. If a profile
 cannot authenticate or a request fails, the output is marked incomplete and
 identifies the affected profile. When an account name matches more than one
 account, select a profile or use its exact account key.
+For aggregate transactions, `--limit` caps the combined output, keeping the
+newest rows across accounts.
+
+Profile rename waits for an active token refresh to save its result. If a
+profile changes while BankID login is pending, that login fails without saving;
+run login again with the current profile name.
 
 `--mask` is a global flag for sharing screenshots: it replaces sensitive values
 (amounts, account numbers, owner names, transaction descriptions, counterparties,

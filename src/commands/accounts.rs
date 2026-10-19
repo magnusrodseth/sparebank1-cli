@@ -203,6 +203,7 @@ pub fn show(
             }))
         }
         OutputMode::Table => {
+            let entry = aggregate::AccountEntry { account, ..entry };
             format::aggregate_accounts_table(&[entry], mask);
             Ok(())
         }

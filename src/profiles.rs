@@ -166,6 +166,25 @@ impl Registry {
     }
 }
 
+/// Keep a selected profile's storage keys stable while reading or replacing its
+/// login. Revalidate after locking because a rename may follow profile selection.
+pub(crate) fn lock_current_profile(profile: &Profile) -> crate::error::Result<std::fs::File> {
+    let lock = secrets::lock_profiles()?;
+    let registry = Registry::load_locked().map_err(|error| {
+        crate::error::Sb1Error::AuthFlow(format!("reading profile registry: {error}"))
+    })?;
+    if !registry
+        .get_optional(&profile.name)
+        .is_some_and(|current| current.legacy == profile.legacy)
+    {
+        return Err(crate::error::Sb1Error::AuthFlow(format!(
+            "profile '{}' changed or was renamed; select it again with --profile",
+            profile.name
+        )));
+    }
+    Ok(lock)
+}
+
 /// Rename a profile while holding the registry lock through secret migration.
 /// Legacy profiles keep their original name-independent secret keys.
 pub fn rename_profile(old_name: &str, new_name: &str) -> Result<Option<String>> {

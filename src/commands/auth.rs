@@ -82,6 +82,17 @@ pub fn login(args: LoginArgs, selected: Option<&str>) -> anyhow::Result<()> {
         println!("Aborted.");
         return Ok(());
     }
+    // A pending BankID flow must not overwrite a newer login, logout, or a
+    // different profile created under the same name after a rename.
+    let original_secrets = if existing.is_some() {
+        let _lock = crate::profiles::lock_current_profile(&profile)?;
+        Some((
+            secrets::kv_get(&profile.credential_key())?,
+            secrets::kv_get(&profile.token_key())?,
+        ))
+    } else {
+        None
+    };
     let creds = resolve_credentials(&args, existing.as_ref())?;
 
     // Show all storage options up front so the choice is informed.
@@ -100,23 +111,37 @@ pub fn login(args: LoginArgs, selected: Option<&str>) -> anyhow::Result<()> {
     }
 
     let token = auth::login(&creds).context("BankID login failed")?;
-    if existing.is_none() {
-        Registry::update(|latest| {
-            if latest.get_optional(&name).is_some() {
-                anyhow::bail!("profile '{name}' already exists");
+    Registry::update(|latest| {
+        if let Some(original) = &existing {
+            if !latest
+                .get_optional(&name)
+                .is_some_and(|current| current.legacy == original.legacy)
+            {
+                anyhow::bail!(
+                    "profile '{name}' changed or was renamed during login; run login again with the current --profile"
+                );
             }
-            if !args.no_save_credentials {
-                secrets::save_credentials_for(&profile, &creds).context("saving credentials")?;
+            let current_secrets = (
+                secrets::kv_get(&profile.credential_key())?,
+                secrets::kv_get(&profile.token_key())?,
+            );
+            if original_secrets.as_ref() != Some(&current_secrets) {
+                anyhow::bail!(
+                    "profile '{name}' login changed during BankID authentication; run login again"
+                );
             }
-            secrets::save_token_for(&profile, &token).context("saving token")?;
-            latest.add(profile.clone())
-        })?;
-    } else {
+        } else if latest.get_optional(&name).is_some() {
+            anyhow::bail!("profile '{name}' already exists");
+        }
         if !args.no_save_credentials {
             secrets::save_credentials_for(&profile, &creds).context("saving credentials")?;
         }
         secrets::save_token_for(&profile, &token).context("saving token")?;
-    }
+        if existing.is_none() {
+            latest.add(profile.clone())?;
+        }
+        Ok(())
+    })?;
     let expiry = Local
         .timestamp_opt(token.expires_at, 0)
         .single()
@@ -145,11 +170,15 @@ fn confirm_new_profile(name: &str) -> anyhow::Result<bool> {
 }
 
 pub fn logout(all: bool, selected: Option<&str>) -> anyhow::Result<()> {
-    let registry = Registry::load()?;
-    let profile = registry.select(selected, true)?;
-    secrets::delete_token_for(&profile)?;
+    let profile = Registry::update(|registry| {
+        let profile = registry.select(selected, true)?;
+        secrets::delete_token_for(&profile)?;
+        if all {
+            secrets::delete_credentials_for(&profile)?;
+        }
+        Ok(profile)
+    })?;
     if all {
-        secrets::delete_credentials_for(&profile)?;
         println!(
             "✅ Logged out profile '{}' and removed stored client credentials.",
             profile.name

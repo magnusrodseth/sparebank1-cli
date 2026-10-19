@@ -180,6 +180,13 @@ fn list_aggregate(args: TxnArgs, mode: OutputMode, mask: bool) -> anyhow::Result
     }
     clients.report_failures();
 
+    // Each account request has its own row limit. Apply the user's maximum to
+    // the combined result, keeping the newest rows across all accounts.
+    if let Some(limit) = args.limit.and_then(|limit| usize::try_from(limit).ok()) {
+        rows.sort_by_key(|(_, txn)| std::cmp::Reverse(txn.date));
+        rows.truncate(limit);
+    }
+
     let rendered: Option<String> = if args.csv {
         Some(format::aggregate_transactions_csv(&rows))
     } else if mode == OutputMode::Json {
