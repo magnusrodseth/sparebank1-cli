@@ -1463,9 +1463,9 @@ fn summary_all_profiles_counts_shared_account_once_and_labels_coverage() {
     let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(body["complete"], true);
     assert_eq!(body["profiles"], serde_json::json!(["alice", "bob"]));
-    assert_eq!(body["netWorth"]["NOK"], 600.0);
-    assert_eq!(body["income"], 500.0);
-    assert_eq!(body["spending"], -110.0);
+    assert_eq!(body["balancesByCurrency"]["NOK"], 600.0);
+    assert_eq!(body["cashFlowByCurrency"]["NOK"]["income"], 500.0);
+    assert_eq!(body["cashFlowByCurrency"]["NOK"]["spending"], -110.0);
     let requests = requests.join().unwrap();
     assert_eq!(requests.len(), 5);
     assert_eq!(
@@ -1505,8 +1505,8 @@ fn summary_all_profiles_uses_an_accessible_fallback_for_a_shared_account() {
     let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(body["complete"], false);
     assert_eq!(body["errors"][0]["profile"], "alice");
-    assert_eq!(body["netWorth"]["NOK"], 100.0);
-    assert_eq!(body["income"], 10.0);
+    assert_eq!(body["balancesByCurrency"]["NOK"], 100.0);
+    assert_eq!(body["cashFlowByCurrency"]["NOK"]["income"], 10.0);
     let requests = requests.join().unwrap();
     assert_eq!(requests.len(), 5);
     assert!(requests[4]
@@ -1572,7 +1572,7 @@ fn summary_all_profiles_stops_after_rate_limit_on_plain_fallback() {
     assert_eq!(body["complete"], false);
     assert_eq!(body["errors"].as_array().unwrap().len(), 1);
     assert_eq!(body["errors"][0]["retryAfterSeconds"], 7);
-    assert_eq!(body["netWorth"]["NOK"], 300.0);
+    assert_eq!(body["balancesByCurrency"]["NOK"], 300.0);
     assert_eq!(requests.join().unwrap().len(), 4);
 }
 
@@ -1601,7 +1601,7 @@ fn summary_all_profiles_stops_processing_accounts_after_rate_limit() {
     assert_eq!(body["complete"], false);
     assert_eq!(body["errors"].as_array().unwrap().len(), 1);
     assert_eq!(body["errors"][0]["retryAfterSeconds"], 7);
-    assert_eq!(body["netWorth"]["NOK"], 300.0);
+    assert_eq!(body["balancesByCurrency"]["NOK"], 300.0);
     assert_eq!(requests.join().unwrap().len(), 3);
 }
 
@@ -2228,7 +2228,7 @@ fn aggregate_regression_classified_partial_errors_mark_summary_and_transactions_
         assert_eq!(body["errors"][0]["profile"], "alice");
         assert_eq!(body["errors"][0]["error"], "RECENT_TRANSACTIONS_FAILED");
         if command == "summary" {
-            assert_eq!(body["spending"], -25.0);
+            assert_eq!(body["cashFlowByCurrency"]["NOK"]["spending"], -25.0);
         } else {
             assert_eq!(body["transactions"].as_array().unwrap().len(), 1);
         }
@@ -2305,9 +2305,9 @@ fn aggregate_summary_excludes_both_legs_of_cross_profile_internal_transfers() {
         ],
     );
     assert_eq!(body["complete"], true);
-    assert_eq!(body["netWorth"]["NOK"], 300.0);
-    assert_eq!(body["income"], 500.0);
-    assert_eq!(body["spending"], -20.0);
+    assert_eq!(body["balancesByCurrency"]["NOK"], 300.0);
+    assert_eq!(body["cashFlowByCurrency"]["NOK"]["income"], 500.0);
+    assert_eq!(body["cashFlowByCurrency"]["NOK"]["spending"], -20.0);
     assert_eq!(requests.len(), 4);
 }
 
@@ -2395,7 +2395,7 @@ fn aggregate_server_failure_does_not_switch_profile_or_retry_plain_transactions(
             .to_lowercase()
             .contains("authorization: bearer alice-token"));
         if command == "summary" {
-            assert_eq!(body["spending"], -10.0);
+            assert_eq!(body["cashFlowByCurrency"]["NOK"]["spending"], -10.0);
             assert!(requests[3].starts_with("GET /personal/banking/transactions/classified?"));
         } else {
             assert_eq!(body["transactions"][0]["profile"], "alice");
@@ -2494,4 +2494,321 @@ fn single_profile_read_outputs_keep_existing_shapes_and_profile_selection() {
             }
         }
     }
+}
+
+#[test]
+fn named_profile_selection_is_explicit_ordered_and_deduplicated() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let registry_path = sandbox.store().join("profiles.json");
+    let mut registry: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&registry_path).unwrap()).unwrap();
+    registry["profiles"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"name":"unselected","legacy":false}));
+    std::fs::write(registry_path, registry.to_string()).unwrap();
+    let (body, requests, _) = aggregate_json(
+        &sandbox,
+        &[
+            "--json",
+            "accounts",
+            "--profile",
+            "bob",
+            "--profile",
+            "alice",
+            "--profile",
+            "bob",
+        ],
+        &[
+            (200, r#"{"accounts":[{"key":"B","name":"Bob"}]}"#),
+            (200, r#"{"accounts":[{"key":"A","name":"Alice"}]}"#),
+        ],
+    );
+    assert_eq!(body["complete"], true);
+    assert_eq!(body["profiles"], serde_json::json!(["bob", "alice"]));
+    assert_eq!(body["accounts"][0]["profiles"], serde_json::json!(["bob"]));
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0]
+        .to_lowercase()
+        .contains("authorization: bearer bob-token"));
+    assert!(requests[1]
+        .to_lowercase()
+        .contains("authorization: bearer alice-token"));
+}
+
+#[test]
+fn multiple_profiles_are_rejected_for_auth_management_and_transfers_before_storage_access() {
+    let sandbox = Sandbox::new();
+    for command in [
+        vec!["login"],
+        vec!["logout"],
+        vec!["refresh"],
+        vec!["status"],
+        vec!["profile", "set-default", "alice"],
+        vec![
+            "transfer", "debit", "--from", "A", "--to", "B", "--amount", "1",
+        ],
+    ] {
+        let mut args = vec!["--profile", "alice", "--profile", "bob"];
+        args.extend(command);
+        let output = sandbox.run(&args);
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("read-only banking commands"));
+        assert!(!sandbox.store().join("profiles.json").exists());
+    }
+}
+
+#[test]
+fn profile_selection_does_not_expand_account_types() {
+    for extra in [None, Some("--all"), Some("--bsu")] {
+        let sandbox = Sandbox::new();
+        sandbox.configured_pair();
+        let mut args = vec!["--json", "--all-profiles", "accounts"];
+        if let Some(flag) = extra {
+            args.push(flag);
+        }
+        let (_, requests, _) = aggregate_json(
+            &sandbox,
+            &args,
+            &[(200, r#"{"accounts":[]}"#), (200, r#"{"accounts":[]}"#)],
+        );
+        for request in requests {
+            let target = request.lines().next().unwrap().to_lowercase();
+            assert_eq!(target.contains("includebsuaccounts=true"), extra.is_some());
+            for field in [
+                "includecreditcardaccounts",
+                "includeaskaccounts",
+                "includepensionaccounts",
+                "includecurrencyaccounts",
+            ] {
+                assert_eq!(
+                    target.contains(&format!("{field}=true")),
+                    extra == Some("--all")
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn combined_summary_separates_every_metric_by_account_currency() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let (body, requests, _) = aggregate_json(
+        &sandbox,
+        &[
+            "--json",
+            "summary",
+            "--profile",
+            "alice",
+            "--profile",
+            "bob",
+            "--months",
+            "1",
+        ],
+        &[
+            (
+                200,
+                r#"{"accounts":[{"key":"N","name":"Accessible NOK","currencyCode":"NOK","accountNumber":"11112222333","balance":100}]}"#,
+            ),
+            (
+                200,
+                r#"{"accounts":[{"key":"U","name":"Accessible USD","currencyCode":"USD","accountNumber":"22223333444","balance":-40}]}"#,
+            ),
+            (
+                200,
+                r#"{"transactions":[{"transaction":{"id":"salary-n","date":1790000000000,"amount":1000}},{"transaction":{"id":"spend-n","date":1790000000000,"amount":-200,"currencyCode":"USD","description":"Service","remoteAccountName":"Party"},"categories":[{"main":"Food"}],"subscription":true},{"transaction":{"id":"transfer-n","amount":-50,"remoteAccountNumber":"22223333444"}}]}"#,
+            ),
+            (
+                200,
+                r#"{"transactions":[{"transaction":{"id":"salary-u","date":1790000000000,"amount":200}},{"transaction":{"id":"spend-u","date":1790000000000,"amount":-50,"description":"Service","remoteAccountName":"Party"},"categories":[{"main":"Food"}],"subscription":true},{"transaction":{"id":"transfer-u","amount":50,"remoteAccountNumber":"11112222333"}}]}"#,
+            ),
+        ],
+    );
+    assert_eq!(body["complete"], true);
+    assert_eq!(
+        body["balancesByCurrency"],
+        serde_json::json!({"NOK":100.0,"USD":-40.0})
+    );
+    assert_eq!(
+        body["positiveBalancesByCurrency"],
+        serde_json::json!({"NOK":100.0,"USD":0.0})
+    );
+    assert_eq!(
+        body["negativeBalancesByCurrency"],
+        serde_json::json!({"NOK":0.0,"USD":-40.0})
+    );
+    for (currency, income, spending, rate, profile) in [
+        ("NOK", 1000.0, -200.0, 80.0, "alice"),
+        ("USD", 200.0, -50.0, 75.0, "bob"),
+    ] {
+        let flow = &body["cashFlowByCurrency"][currency];
+        assert_eq!(flow["income"], income);
+        assert_eq!(flow["spending"], spending);
+        assert_eq!(flow["net"], income + spending);
+        assert_eq!(flow["savingsRatePct"], rate);
+        assert_eq!(flow["monthly"][0]["out"], spending);
+        assert_eq!(flow["categories"][0]["amount"], spending);
+        assert_eq!(flow["topOutgoing"][0]["amount"], spending);
+        assert_eq!(flow["subscriptions"][0]["amount"], spending);
+        assert!(body["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["currency"] == currency && a["profiles"] == serde_json::json!([profile])));
+    }
+    for legacy in [
+        "netWorth",
+        "assets",
+        "liabilities",
+        "income",
+        "spending",
+        "net",
+        "savingsRatePct",
+    ] {
+        assert!(body.get(legacy).is_none());
+    }
+    assert_eq!(requests.len(), 4);
+}
+
+#[test]
+fn combined_summary_tables_use_currency_labels_and_mask_sensitive_values() {
+    for masked in [false, true] {
+        let sandbox = Sandbox::new();
+        sandbox.configured_pair();
+        let (url, requests) = fake_bank_sequence(&[
+            r#"{"accounts":[{"key":"N","name":"NOK account","currencyCode":"NOK","balance":1234}]}"#,
+            r#"{"accounts":[{"key":"U","name":"USD account","currencyCode":"USD","balance":5678}]}"#,
+            r#"{"transactions":[{"transaction":{"id":"n","amount":-111,"description":"Private merchant N"},"subscription":true}]}"#,
+            r#"{"transactions":[{"transaction":{"id":"u","amount":-222,"description":"Private merchant U"},"subscription":true}]}"#,
+        ]);
+        let mut args = vec!["summary", "--all-profiles"];
+        if masked {
+            args.push("--mask");
+        }
+        let output = sandbox
+            .command(&args)
+            .env("SB1_TEST_API_BASE_URL", url)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert!(stdout.contains("Combined account summary"));
+        assert!(stdout.contains("Accessible accounts"));
+        assert!(stdout.contains("transfers between included accounts excluded"));
+        assert!(!stdout.contains("Net worth"));
+        assert!(!stdout.contains("liabilities"));
+        assert!(stdout.contains("NOK"));
+        assert!(stdout.contains("USD"));
+        if masked {
+            for private in ["1 234", "5678", "111", "222", "Private merchant"] {
+                assert!(!stdout.contains(private), "{stdout}");
+            }
+            assert!(stdout.contains("***** USD"));
+        } else {
+            assert!(stdout.contains("5678.00 USD"));
+            assert!(stdout.contains("-222.00 USD"));
+            assert!(stdout.contains("Private merchant"));
+        }
+        assert_eq!(requests.join().unwrap().len(), 4);
+    }
+}
+
+#[test]
+fn repeated_single_profile_retains_single_profile_json_and_one_request() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let (body, requests, _) = aggregate_json(
+        &sandbox,
+        &["--json", "accounts", "--profile", "bob", "--profile", "bob"],
+        &[(200, r#"{"accounts":[{"key":"B","name":"Bob"}]}"#)],
+    );
+    assert!(body.get("complete").is_none());
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0]
+        .to_lowercase()
+        .contains("authorization: bearer bob-token"));
+}
+
+#[test]
+fn profile_flags_before_and_after_subcommand_select_the_same_profiles() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    let (body, requests, _) = aggregate_json(
+        &sandbox,
+        &[
+            "--json",
+            "--profile",
+            "alice",
+            "accounts",
+            "--profile",
+            "bob",
+        ],
+        &[
+            (200, r#"{"accounts":[{"key":"A","name":"Alice"}]}"#),
+            (200, r#"{"accounts":[{"key":"B","name":"Bob"}]}"#),
+        ],
+    );
+    assert_eq!(body["profiles"], serde_json::json!(["alice", "bob"]));
+    assert_eq!(requests.len(), 2);
+}
+
+#[test]
+fn nested_profile_flags_cannot_select_multiple_transfer_logins() {
+    let sandbox = Sandbox::new();
+    let output = sandbox.run(&[
+        "--profile",
+        "alice",
+        "transfer",
+        "debit",
+        "--profile",
+        "bob",
+        "--from",
+        "A",
+        "--to",
+        "B",
+        "--amount",
+        "1",
+    ]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("read-only banking commands"));
+    assert!(!sandbox.store().join("profiles.json").exists());
+}
+
+#[test]
+fn all_profiles_conflicts_with_named_profiles_across_command_levels() {
+    let sandbox = Sandbox::new();
+    for args in [
+        vec!["--profile", "alice", "accounts", "--all-profiles"],
+        vec!["--all-profiles", "accounts", "--profile", "bob"],
+    ] {
+        let output = sandbox.run(&args);
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("--profile"));
+        assert!(!sandbox.store().join("profiles.json").exists());
+    }
+}
+
+#[test]
+fn unknown_profile_in_selection_is_a_hard_error() {
+    let sandbox = Sandbox::new();
+    sandbox.configured_pair();
+    expire_profile(&sandbox, "616c696365");
+    let output = sandbox
+        .command(&[
+            "--json",
+            "accounts",
+            "--profile",
+            "alice",
+            "--profile",
+            "missing",
+        ])
+        .env("SB1_TEST_API_BASE_URL", "http://127.0.0.1:1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("profile 'missing' does not exist"));
+    assert!(!stderr.contains("network error"));
 }

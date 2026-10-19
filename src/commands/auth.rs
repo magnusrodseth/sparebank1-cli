@@ -275,8 +275,11 @@ fn profile_status(profile: &Profile, registry: &Registry) -> anyhow::Result<serd
     }))
 }
 
-pub fn hello(selected: Option<&str>, all_profiles: bool, mode: OutputMode) -> anyhow::Result<()> {
-    let mut clients = crate::commands::aggregate::clients_for(selected, all_profiles)?;
+pub fn hello(
+    selection: &crate::profiles::ProfileSelection,
+    mode: OutputMode,
+) -> anyhow::Result<()> {
+    let mut clients = crate::commands::aggregate::clients_for(selection)?;
     if !clients.aggregated {
         let msg = clients.clients[0]
             .client

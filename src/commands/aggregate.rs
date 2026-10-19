@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::client::AccountListOpts;
 use crate::client::ApiClient;
 use crate::models::Account;
-use crate::profiles::{Profile, Registry};
+use crate::profiles::{Profile, ProfileSelection, Registry};
 
 pub struct ProfileClient {
     pub profile: Profile,
@@ -167,45 +167,50 @@ fn profile_failure(profile: &str, error: &anyhow::Error) -> ProfileFailure {
 
 /// Resolve the requested profile set and authenticate independently per profile.
 /// In aggregate mode, one failed profile does not discard other profiles' data.
-pub fn clients_for(selected: Option<&str>, all_profiles: bool) -> Result<ClientCollection> {
+pub fn clients_for(selection: &ProfileSelection) -> Result<ClientCollection> {
     let registry = Registry::load()?;
-    if all_profiles {
-        if registry.profiles.is_empty() {
-            bail!("no profile configured; run sb1 login first");
-        }
-        let profiles: Vec<String> = registry.profiles.iter().map(|p| p.name.clone()).collect();
-        let mut clients = Vec::new();
-        let mut failures = Vec::new();
-        let mut rate_limited = false;
-        for profile in registry.profiles {
-            match crate::commands::authed_client_for(&profile) {
-                Ok(client) => clients.push(ProfileClient { profile, client }),
-                Err(error) => {
-                    rate_limited = is_rate_limited(&error);
-                    failures.push(profile_failure(&profile.name, &error));
-                    if rate_limited {
-                        break;
-                    }
+    // Resolve every name before authenticating, so a typo cannot produce a
+    // seemingly valid partial selection or refresh unrelated profiles.
+    let selected = selection.resolve(&registry)?;
+    if !selection.is_combined() {
+        let profile = selected
+            .into_iter()
+            .next()
+            .expect("single-profile selection");
+        let client = crate::commands::authed_client_for(&profile)?;
+        return Ok(ClientCollection {
+            profiles: vec![profile.name.clone()],
+            clients: vec![ProfileClient { profile, client }],
+            failures: Vec::new(),
+            aggregated: false,
+            rate_limited: false,
+        });
+    }
+    let profiles = selected
+        .iter()
+        .map(|profile| profile.name.clone())
+        .collect();
+    let mut clients = Vec::new();
+    let mut failures = Vec::new();
+    let mut rate_limited = false;
+    for profile in selected {
+        match crate::commands::authed_client_for(&profile) {
+            Ok(client) => clients.push(ProfileClient { profile, client }),
+            Err(error) => {
+                rate_limited = is_rate_limited(&error);
+                failures.push(profile_failure(&profile.name, &error));
+                if rate_limited {
+                    break;
                 }
             }
         }
-        return Ok(ClientCollection {
-            profiles,
-            clients,
-            failures,
-            aggregated: true,
-            rate_limited,
-        });
     }
-
-    let profile = registry.select(selected, false)?;
-    let client = crate::commands::authed_client_for(&profile)?;
     Ok(ClientCollection {
-        profiles: vec![profile.name.clone()],
-        clients: vec![ProfileClient { profile, client }],
-        failures: Vec::new(),
-        aggregated: false,
-        rate_limited: false,
+        profiles,
+        clients,
+        failures,
+        aggregated: true,
+        rate_limited,
     })
 }
 

@@ -16,12 +16,10 @@ mod secrets;
 mod terms;
 mod util;
 
-use clap::Parser;
-
 use crate::cli::Cli;
 
 fn main() {
-    let cli = Cli::parse();
+    let cli = Cli::parse_cli();
     if let Err(err) = commands::run(cli) {
         // Print the full error chain to stderr, secrets already redacted upstream.
         eprintln!("error: {err}");

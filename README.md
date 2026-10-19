@@ -185,6 +185,8 @@ sb1 hello --all-profiles         # check every configured profile
 sb1 accounts                     # default profile (add --all for account types)
 sb1 accounts --profile <profile-name>
 sb1 accounts --all-profiles      # combine profiles; shared accounts appear once
+sb1 accounts --profile alice --profile bob
+sb1 accounts --all-profiles --all # independently include every account type
 sb1 account Brukskonto           # one account (by name, key, or number)
 sb1 account Brukskonto --all-profiles
 sb1 account Brukskonto --details # extended details
@@ -223,6 +225,7 @@ sb1 logout --profile <profile-name> --all
 sb1 summary --months 6
 sb1 summary --months 6 --profile <profile-name>
 sb1 summary --months 6 --all-profiles
+sb1 summary --profile alice --profile bob --json
 sb1 --json summary
 
 # Mask sensitive values for screenshots (amounts, account numbers, names)
@@ -247,7 +250,8 @@ Most commands take an account as a positional argument (`sb1 account Brukskonto`
 `-a`/`--account` flag and lets you pass several accounts (positionally or with
 repeated `-a`); omit the account entirely to query all of them.
 
-Read commands use the default profile unless `--profile` is supplied. `login`
+Read commands use the default profile unless a profile selection is supplied.
+Repeat `--profile` to combine a selected subset in the order given. `login`
 without `--profile` reauthenticates the current default. `refresh` and `logout`
 require `--profile` when multiple profiles exist. Transfers always use one
 profile and require `--profile` when more than one is configured.
@@ -262,7 +266,8 @@ With no profiles configured, the top-level booleans are `false` and
 `--all-profiles` opts into combined read-only results for `hello`, `accounts`,
 `account`, `balance`, `transactions`, `transaction`, `export`, and `summary`.
 It cannot be combined with `--profile` and is not supported by status, login,
-logout, refresh, profile management, or transfers. Aggregate results identify
+logout, refresh, profile management, or transfers. Those commands also reject
+multiple selected profiles. Combined results identify
 their source profiles. Shared accounts are deduplicated by the bank account key
 and counted once in summaries;
 transaction and export rows include the profile used to fetch them. If a profile
@@ -271,6 +276,20 @@ identifies the affected profile. When an account name matches more than one
 account, select a profile or use its exact account key.
 For aggregate transactions, `--limit` caps the combined output, keeping the
 newest rows across accounts.
+
+Profile selection does not change account types: `accounts --all-profiles` uses
+normal account filters; add `--all` or individual type flags independently.
+Other read commands keep their existing account-type policy.
+
+Combined summaries describe accessible accounts, with source-profile attribution,
+without claiming ownership or household membership. Transfers between included
+accounts are excluded from income and spending. The combined JSON contains
+`balancesByCurrency`, `positiveBalancesByCurrency`, `negativeBalancesByCurrency`,
+and `cashFlowByCurrency`. Each cash-flow entry contains income, spending, net,
+savings rate, monthly totals, categories, counterparties, and subscriptions
+for that currency. Posted transaction amounts use the queried account's currency;
+there is no currency conversion. Single-profile JSON keeps its released fields.
+
 
 Profile rename waits for an active token refresh to save its result. If a
 profile changes while BankID login is pending, that login fails without saving;

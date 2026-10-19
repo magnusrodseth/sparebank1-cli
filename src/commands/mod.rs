@@ -100,9 +100,9 @@ pub fn resolve_account_ref(accounts: &[Account], input: &str) -> anyhow::Result<
 pub fn run(cli: Cli) -> anyhow::Result<()> {
     let mode = output_mode(&cli);
     let mask = cli.mask;
-    let selected = cli.profile.as_deref();
-    let all_profiles = cli.all_profiles;
-    if all_profiles
+    let selection = crate::profiles::ProfileSelection::new(&cli.profile, cli.all_profiles);
+    let selected = selection.single_name();
+    if selection.is_combined()
         && !matches!(
             &cli.command,
             Command::Hello
@@ -115,7 +115,9 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
                 | Command::Summary { .. }
         )
     {
-        anyhow::bail!("--all-profiles is only supported for read-only banking commands");
+        anyhow::bail!(
+            "combined profile selection is only supported for read-only banking commands"
+        );
     }
     match cli.command {
         Command::Profile { action } => match action {
@@ -153,23 +155,21 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Login(args) => auth::login(args, selected),
         Command::Logout { all } => auth::logout(all, selected),
         Command::Status => auth::status(mode, selected),
-        Command::Hello => auth::hello(selected, all_profiles, mode),
+        Command::Hello => auth::hello(&selection, mode),
         Command::Refresh => auth::refresh(selected),
-        Command::Accounts(args) => accounts::list(args, mode, mask, selected, all_profiles),
-        Command::Account(args) => accounts::show(args, mode, mask, selected, all_profiles),
+        Command::Accounts(args) => accounts::list(args, mode, mask, &selection),
+        Command::Account(args) => accounts::show(args, mode, mask, &selection),
         Command::Balance { account_number } => {
-            accounts::balance(account_number, mode, mask, selected, all_profiles)
+            accounts::balance(account_number, mode, mask, &selection)
         }
-        Command::Transactions(args) => transactions::list(args, mode, mask, selected, all_profiles),
-        Command::Transaction { id, classified } => {
-            transactions::show(id, classified, selected, all_profiles)
-        }
-        Command::Export(args) => transactions::export(args, selected, all_profiles),
+        Command::Transactions(args) => transactions::list(args, mode, mask, &selection),
+        Command::Transaction { id, classified } => transactions::show(id, classified, &selection),
+        Command::Export(args) => transactions::export(args, &selection),
         Command::Transfer { kind } => {
             let profile = crate::profiles::Registry::load()?.select(selected, true)?;
             transfer::run(kind, mode, &profile)
         }
-        Command::Summary { months } => summary::run(months, mode, mask, selected, all_profiles),
+        Command::Summary { months } => summary::run(months, mode, mask, &selection),
     }
 }
 

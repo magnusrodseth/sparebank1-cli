@@ -1,6 +1,6 @@
 //! Command-line surface (clap derive).
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 
 /// Feature-complete CLI for the SpareBank 1 personal banking API.
 ///
@@ -10,9 +10,9 @@ use clap::{Args, Parser, Subcommand};
 #[derive(Debug, Parser)]
 #[command(name = "sb1", version, about, long_about = None)]
 pub struct Cli {
-    /// Select a locally configured banking profile.
-    #[arg(long, global = true)]
-    pub profile: Option<String>,
+    /// Select a banking profile. Repeat for combined read-only views.
+    #[arg(long)]
+    pub profile: Vec<String>,
 
     /// Combine read-only results from every configured profile.
     #[arg(long, global = true, conflicts_with = "profile")]
@@ -30,6 +30,55 @@ pub struct Cli {
 
     #[command(subcommand)]
     pub command: Command,
+}
+
+impl Cli {
+    pub fn parse_cli() -> Self {
+        Self::try_parse_cli_from(std::env::args_os()).unwrap_or_else(|error| error.exit())
+    }
+
+    pub fn try_parse_cli_from<I, T>(args: I) -> Result<Self, clap::Error>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<std::ffi::OsString> + Clone,
+    {
+        let mut command = Self::command();
+        let profile = command
+            .get_arguments()
+            .find(|arg| arg.get_id() == "profile")
+            .expect("profile option")
+            .clone();
+        // A global Append argument loses parent values when used again in a
+        // subcommand. Parse each level locally, then preserve the full selection.
+        fn add_profile_option(command: &mut clap::Command, profile: &clap::Arg) {
+            for child in command.get_subcommands_mut() {
+                *child = child.clone().arg(profile.clone());
+                add_profile_option(child, profile);
+            }
+        }
+        add_profile_option(&mut command, &profile);
+        let matches = command.try_get_matches_from(args)?;
+        let mut profiles = Vec::new();
+        let mut level = &matches;
+        loop {
+            if let Some(names) = level.get_many::<String>("profile") {
+                profiles.extend(names.cloned());
+            }
+            match level.subcommand() {
+                Some((_, child)) => level = child,
+                None => break,
+            }
+        }
+        let mut cli = Self::from_arg_matches(&matches)?;
+        if cli.all_profiles && !profiles.is_empty() {
+            return Err(clap::Error::raw(
+                clap::error::ErrorKind::ArgumentConflict,
+                "--all-profiles cannot be combined with --profile",
+            ));
+        }
+        cli.profile = profiles;
+        Ok(cli)
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -336,13 +385,33 @@ mod tests {
 
     #[test]
     fn all_profiles_flag_is_available_for_read_commands() {
-        assert!(Cli::try_parse_from(["sb1", "--all-profiles", "accounts"]).is_ok());
+        assert!(Cli::try_parse_cli_from(["sb1", "--all-profiles", "accounts"]).is_ok());
     }
 
     #[test]
     fn profile_and_all_profiles_are_mutually_exclusive() {
         let parsed =
-            Cli::try_parse_from(["sb1", "--profile", "alice", "--all-profiles", "accounts"]);
+            Cli::try_parse_cli_from(["sb1", "--profile", "alice", "--all-profiles", "accounts"]);
         assert!(parsed.is_err());
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::Cli;
+
+    #[test]
+    fn positional_profile_text_does_not_change_selection() {
+        let cli = Cli::try_parse_cli_from([
+            "sb1",
+            "transactions",
+            "--profile",
+            "bob",
+            "--",
+            "--profile",
+            "alice",
+        ])
+        .unwrap();
+        assert_eq!(cli.profile, ["bob"]);
     }
 }

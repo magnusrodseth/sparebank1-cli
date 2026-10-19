@@ -74,7 +74,8 @@ analysis prefer `transactions --json` or `transactions --csv` instead.
 ```bash
 sb1 summary --months 6        # net worth, monthly cash flow, categories, subs
 sb1 --json summary --months 6 # machine-readable
-sb1 summary --months 6 --all-profiles # aggregate household-level view
+sb1 summary --months 6 --all-profiles # combined account summary
+sb1 summary --profile alice --profile bob --json # selected subset
 ```
 
 `summary` is generalizable across any account setup: net worth per currency,
@@ -82,6 +83,14 @@ income vs spending (internal transfers between the user's own accounts are
 excluded), monthly breakdown, spending by **bank-assigned category**, top
 counterparties, and bank-flagged subscriptions. Prefer this over hand-rolled
 analysis.
+
+Repeat `--profile` to combine a selected subset. Combined summaries describe
+accessible accounts, not ownership or household membership. Their balance maps
+are `balancesByCurrency`, `positiveBalancesByCurrency`, and
+`negativeBalancesByCurrency`. Read income, spending, monthly totals, categories,
+counterparties, subscriptions, and savings rates within each `cashFlowByCurrency`
+entry. Transfers between included accounts are excluded. Keep currencies separate;
+the CLI does no currency conversion. Single-profile JSON retains its existing fields.
 
 Read commands use the default profile unless `--profile <profile-name>` or
 `--all-profiles` is supplied. Aggregate views deduplicate accounts by bank
@@ -91,8 +100,8 @@ temporary lookup value; use `transaction <id> --all-profiles` to search each
 configured profile. Aggregate JSON includes `complete` and `errors`; check them
 before relying on results. For table and CSV output, partial failures are
 reported on stderr. `--profile` and `--all-profiles` cannot be combined. Use
-`accounts --all` for all account types in one profile; aggregate account lists
-include all account types by default.
+`accounts --all` for all account types independently of profile selection;
+combined account lists use the same type filters as single-profile lists.
 
 ## Manual analysis pattern
 

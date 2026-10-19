@@ -51,6 +51,8 @@ variables). `sb1 profile set-default <profile-name>` changes the designation.
 `sb1 profile rename <old-name> <new-name>` changes a profile's local name
 without requiring a new BankID login; the default designation follows the rename.
 `refresh` and `logout` require `--profile` when multiple profiles exist.
+Repeat `--profile` to select a subset for combined reads. Commands requiring
+one profile reject multiple selected profiles. Repeated names are queried once.
 Read-only commands accept `--all-profiles` to combine results from every
 configured profile: `hello`, `accounts`, `account`, `balance`, `transactions`,
 `transaction`, `export`, and `summary`. This option is mutually exclusive with
@@ -74,8 +76,11 @@ sessions. Secrets live in one of three backends, chosen by `SB1_STORE`:
 
 When more than one profile exists, transfers also require `--profile`. The
 confirmation summary names the selected profile. `accounts --all` selects all
-account types for one profile; `accounts --all-profiles` combines profiles and
-includes all account types.
+account types independently of profile selection. `accounts --all-profiles`
+keeps normal type filters; add `--all` or individual type flags when needed.
+Combined summaries describe accessible accounts and expose balance maps by
+currency plus `cashFlowByCurrency`. Interpret each currency separately and
+preserve source attribution. Single-profile JSON keeps the released fields.
 
 If a command reports "not logged in" or the client secret is rejected, tell the
 user to run `sb1 login` (the secret has limited validity and may need rotating

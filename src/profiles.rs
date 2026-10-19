@@ -33,6 +33,55 @@ impl Profile {
     }
 }
 
+/// The profiles explicitly selected for a read, or the implicit default.
+#[derive(Debug, Clone)]
+pub enum ProfileSelection {
+    Default,
+    Named(Vec<String>),
+    All,
+}
+
+impl ProfileSelection {
+    pub fn new(names: &[String], all: bool) -> Self {
+        if all {
+            return Self::All;
+        }
+        let mut unique = Vec::new();
+        for name in names {
+            if !unique.contains(name) {
+                unique.push(name.clone());
+            }
+        }
+        if unique.is_empty() {
+            Self::Default
+        } else {
+            Self::Named(unique)
+        }
+    }
+
+    pub fn is_combined(&self) -> bool {
+        matches!(self, Self::All) || matches!(self, Self::Named(names) if names.len() > 1)
+    }
+
+    pub fn single_name(&self) -> Option<&str> {
+        match self {
+            Self::Named(names) if names.len() == 1 => Some(&names[0]),
+            _ => None,
+        }
+    }
+
+    pub fn resolve(&self, registry: &Registry) -> Result<Vec<Profile>> {
+        match self {
+            Self::Default => Ok(vec![registry.selected_default()?]),
+            Self::Named(names) => names.iter().map(|name| registry.get(name)).collect(),
+            Self::All if registry.profiles.is_empty() => {
+                bail!("no profile configured; run sb1 login first")
+            }
+            Self::All => Ok(registry.profiles.clone()),
+        }
+    }
+}
+
 fn encode_name(name: &str) -> String {
     name.as_bytes().iter().map(|b| format!("{b:02x}")).collect()
 }

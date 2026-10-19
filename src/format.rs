@@ -31,6 +31,17 @@ fn base_table() -> Table {
     t
 }
 
+/// Format an amount in its account currency, preserving that unit when masked.
+pub fn money(value: f64, currency: &str, mask: bool) -> String {
+    if currency == "NOK" {
+        return kr(value, mask);
+    }
+    if mask {
+        return format!("{}***** {currency}", if value < 0.0 { "-" } else { "" });
+    }
+    format!("{value:.2} {currency}")
+}
+
 /// Render accounts as an aligned table. With `mask`, account numbers and
 /// balances are hidden (for sharing screenshots); names/currency/key stay.
 pub fn accounts_table(accounts: &[Account], mask: bool) {
@@ -77,7 +88,8 @@ pub fn aggregate_accounts_table(accounts: &[AccountEntry], mask: bool) {
             Cell::new(entry.profiles.join(", ")),
             Cell::new(&account.name),
             Cell::new(number),
-            Cell::new(kr(account.display_balance(), mask)).set_alignment(CellAlignment::Right),
+            Cell::new(money(account.display_balance(), account.currency(), mask))
+                .set_alignment(CellAlignment::Right),
             Cell::new(account.currency()),
             Cell::new(&account.key),
         ]);

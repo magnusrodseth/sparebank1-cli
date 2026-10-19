@@ -15,13 +15,12 @@ pub fn list(
     args: TxnArgs,
     mode: OutputMode,
     mask: bool,
-    selected: Option<&str>,
-    all_profiles: bool,
+    selection: &crate::profiles::ProfileSelection,
 ) -> anyhow::Result<()> {
-    if all_profiles {
-        return list_aggregate(args, mode, mask);
+    if selection.is_combined() {
+        return list_aggregate(args, mode, mask, selection);
     }
-    let clients = crate::commands::aggregate::clients_for(selected, false)?;
+    let clients = crate::commands::aggregate::clients_for(selection)?;
     let client = &clients.clients[0].client;
 
     // Resolve each account reference (positional or -a/--account) to its key.
@@ -105,10 +104,20 @@ pub fn list(
     Ok(())
 }
 
-fn list_aggregate(args: TxnArgs, mode: OutputMode, mask: bool) -> anyhow::Result<()> {
-    let mut clients = crate::commands::aggregate::clients_for(None, true)?;
-    let entries = clients.fetch_accounts(&crate::commands::accounts::all_accounts_opts());
+fn list_aggregate(
+    args: TxnArgs,
+    mode: OutputMode,
+    mask: bool,
+    selection: &crate::profiles::ProfileSelection,
+) -> anyhow::Result<()> {
+    let mut clients = crate::commands::aggregate::clients_for(selection)?;
     let refs = args.account_refs();
+    let opts = if refs.is_empty() {
+        Default::default()
+    } else {
+        crate::commands::accounts::all_accounts_opts()
+    };
+    let entries = clients.fetch_accounts(&opts);
     let selected_entries = if refs.is_empty() {
         entries
     } else {
@@ -237,10 +246,9 @@ fn txn_date_range(args: &TxnArgs) -> (String, String) {
 pub fn show(
     id: String,
     classified: bool,
-    selected: Option<&str>,
-    all_profiles: bool,
+    selection: &crate::profiles::ProfileSelection,
 ) -> anyhow::Result<()> {
-    let mut clients = crate::commands::aggregate::clients_for(selected, all_profiles)?;
+    let mut clients = crate::commands::aggregate::clients_for(selection)?;
     if clients.aggregated {
         let mut matches = Vec::new();
         let mut failures = Vec::new();
@@ -300,12 +308,15 @@ fn is_not_found(error: &crate::error::Sb1Error) -> bool {
     matches!(error, crate::error::Sb1Error::Api { status: 404, .. })
 }
 
-pub fn export(args: ExportArgs, selected: Option<&str>, all_profiles: bool) -> anyhow::Result<()> {
+pub fn export(
+    args: ExportArgs,
+    selection: &crate::profiles::ProfileSelection,
+) -> anyhow::Result<()> {
     let from = args.from.clone().unwrap_or_else(|| util::days_ago(90));
     let to = args.to.clone().unwrap_or_else(util::today);
 
-    if all_profiles {
-        let mut clients = crate::commands::aggregate::clients_for(None, true)?;
+    if selection.is_combined() {
+        let mut clients = crate::commands::aggregate::clients_for(selection)?;
         let entries = clients.fetch_accounts(&crate::commands::accounts::all_accounts_opts());
         let entry = match crate::commands::aggregate::resolve_account(&entries, &args.account) {
             Ok(entry) => entry,
@@ -336,7 +347,7 @@ pub fn export(args: ExportArgs, selected: Option<&str>, all_profiles: bool) -> a
         );
     }
 
-    let clients = crate::commands::aggregate::clients_for(selected, false)?;
+    let clients = crate::commands::aggregate::clients_for(selection)?;
     let client = &clients.clients[0].client;
     let account = resolve_account(client, &args.account)?;
 

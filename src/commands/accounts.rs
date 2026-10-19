@@ -11,10 +11,9 @@ pub fn list(
     args: AccountsArgs,
     mode: OutputMode,
     mask: bool,
-    selected: Option<&str>,
-    all_profiles: bool,
+    selection: &crate::profiles::ProfileSelection,
 ) -> anyhow::Result<()> {
-    let all = all_profiles || args.all;
+    let all = args.all;
     let opts = AccountListOpts {
         include_credit_cards: all || args.credit_cards,
         include_bsu: all || args.bsu,
@@ -22,8 +21,8 @@ pub fn list(
         include_pension: all || args.pension,
         include_currency: all || args.currency,
     };
-    if !all_profiles {
-        let clients = aggregate::clients_for(selected, false)?;
+    if !selection.is_combined() {
+        let clients = aggregate::clients_for(selection)?;
         let accounts = clients.clients[0]
             .client
             .accounts(&opts)
@@ -43,7 +42,7 @@ pub fn list(
         };
     }
 
-    let mut clients = aggregate::clients_for(None, true)?;
+    let mut clients = aggregate::clients_for(selection)?;
     let accounts = clients.fetch_accounts(&opts);
     clients.report_failures();
     match mode {
@@ -73,11 +72,10 @@ pub fn show(
     args: AccountArgs,
     mode: OutputMode,
     mask: bool,
-    selected: Option<&str>,
-    all_profiles: bool,
+    selection: &crate::profiles::ProfileSelection,
 ) -> anyhow::Result<()> {
-    if !all_profiles {
-        let clients = aggregate::clients_for(selected, false)?;
+    if !selection.is_combined() {
+        let clients = aggregate::clients_for(selection)?;
         let client = &clients.clients[0].client;
         let account = resolve_account(client, &args.account)?;
 
@@ -106,7 +104,7 @@ pub fn show(
         };
     }
 
-    let mut clients = aggregate::clients_for(None, true)?;
+    let mut clients = aggregate::clients_for(selection)?;
     let opts = all_accounts_opts();
     let entries = clients.fetch_accounts(&opts);
     let entry = match aggregate::resolve_account(&entries, &args.account) {
@@ -214,15 +212,14 @@ pub fn balance(
     account_number: String,
     _mode: OutputMode,
     _mask: bool,
-    selected: Option<&str>,
-    all_profiles: bool,
+    selection: &crate::profiles::ProfileSelection,
 ) -> anyhow::Result<()> {
     let digits: String = account_number
         .chars()
         .filter(|c| c.is_ascii_digit())
         .collect();
-    if !all_profiles {
-        let clients = aggregate::clients_for(selected, false)?;
+    if !selection.is_combined() {
+        let clients = aggregate::clients_for(selection)?;
         let balance = clients.clients[0]
             .client
             .balance(&digits)
@@ -230,7 +227,7 @@ pub fn balance(
         return format::print_json(&balance);
     }
 
-    let mut clients = aggregate::clients_for(None, true)?;
+    let mut clients = aggregate::clients_for(selection)?;
     let entries = clients.fetch_accounts(&all_accounts_opts());
     let entry = match aggregate::resolve_account(&entries, &digits) {
         Ok(entry) => entry,

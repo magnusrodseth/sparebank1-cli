@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Select profiles explicitly for combined account views
@@ -23,5 +23,9 @@ Calculate each savings rate from income and spending in the same currency.
 Preserve the released single-profile JSON fields for compatibility.
 The distinct combined schema avoids extending ownership claims to accounts that the selected users can only access.
 
-This is a proposed implementation contract from the terminology discussion, tracked alongside [#3](https://github.com/magnusrodseth/sparebank1-cli/pull/3).
-That PR currently provides `--all-profiles`; repeated profile selection and the currency-separated combined schema remain implementation work.
+The combined JSON groups cash flow under `cashFlowByCurrency` and includes
+account-to-profile attribution. Posted amounts are grouped by the queried
+account's currency without currency conversion.
+
+This contract is implemented in [#3](https://github.com/magnusrodseth/sparebank1-cli/pull/3).
+The single-profile output contract from [ADR 0002](0002-derived-summaries-and-bank-classification.md) remains compatible.
