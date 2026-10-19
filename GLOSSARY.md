@@ -9,7 +9,7 @@ A locally named banking login with its own authentication credentials.
 _Avoid_: Person, bank account
 
 **Default profile**:
-The profile selected when a banking read does not name a profile.
+The profile used for a banking read when the user makes no explicit profile selection.
 
 **Profile selection**:
 The profiles deliberately chosen for a banking read. Selecting every configured profile is one possible selection.
