@@ -176,16 +176,23 @@ export SB1_STORE=file
 sb1 status                       # status for every profile
 sb1 status --profile <profile-name>    # status for one profile
 sb1 profile set-default <profile-name>  # choose the implicit profile
+sb1 profile rename <old-name> <new-name> # rename without logging in again
 sb1 hello                        # verify the default profile
 sb1 hello --profile <profile-name>
+sb1 hello --all-profiles         # check every configured profile
 
 # Accounts
 sb1 accounts                     # default profile (add --all for account types)
 sb1 accounts --profile <profile-name>
+sb1 accounts --all-profiles      # combine profiles; shared accounts appear once
+sb1 accounts --profile alice --profile bob
+sb1 accounts --all-profiles --all # independently include every account type
 sb1 account Brukskonto           # one account (by name, key, or number)
+sb1 account Brukskonto --all-profiles
 sb1 account Brukskonto --details # extended details
 sb1 account Brukskonto --roles   # roles
 sb1 balance 1234.56.78903        # balance by account number
+sb1 balance 1234.56.78903 --all-profiles
 
 # Transactions (account is positional, or use -a/--account; omit for all accounts)
 sb1 transactions Brukskonto --days 30
@@ -193,9 +200,12 @@ sb1 transactions Brukskonto Sparekonto --days 30  # multiple accounts
 sb1 transactions -a Brukskonto --days 30          # -a/--account works too
 sb1 transactions Brukskonto --from 2026-01-01 --to 2026-03-31
 sb1 transactions Brukskonto --classified --profile <profile-name>
+sb1 transactions --all-profiles --days 30
 sb1 transaction <id>             # details for one transaction
+sb1 transaction <id> --all-profiles
 sb1 transactions Brukskonto --csv -o out.csv      # local CSV
 sb1 export -a Brukskonto -o booked.csv            # server-side CSV export
+sb1 export -a Brukskonto --all-profiles -o booked.csv
 
 # Transfers (always confirms first; -y to skip)
 sb1 transfer debit --from Brukskonto --to Sparekonto --amount 250
@@ -214,6 +224,8 @@ sb1 logout --profile <profile-name> --all
 # Financial overview: net worth, monthly cash flow, categories, subscriptions
 sb1 summary --months 6
 sb1 summary --months 6 --profile <profile-name>
+sb1 summary --months 6 --all-profiles
+sb1 summary --profile alice --profile bob --json
 sb1 --json summary
 
 # Mask sensitive values for screenshots (amounts, account numbers, names)
@@ -223,6 +235,10 @@ sb1 accounts --mask
 
 Replace `<profile-name>` in these examples with the label you chose when
 creating the profile (for example, `shared`).
+
+`sb1 profile rename <old-name> <new-name>` renames a local profile and keeps
+its saved credentials and token. If the profile is the default, it remains the
+default under its new name.
 
 `--classified` enriches transactions with the bank's own category, recurring,
 and subscription flags. `summary` builds on the same classification, so its
@@ -234,7 +250,8 @@ Most commands take an account as a positional argument (`sb1 account Brukskonto`
 `-a`/`--account` flag and lets you pass several accounts (positionally or with
 repeated `-a`); omit the account entirely to query all of them.
 
-Read commands use the default profile unless `--profile` is supplied. `login`
+Read commands use the default profile unless a profile selection is supplied.
+Repeat `--profile` to combine a selected subset in the order given. `login`
 without `--profile` reauthenticates the current default. `refresh` and `logout`
 require `--profile` when multiple profiles exist. Transfers always use one
 profile and require `--profile` when more than one is configured.
@@ -245,6 +262,38 @@ profile, or the default when `--profile` is omitted. The `profiles` array
 contains per-profile status, and `defaultProfile` identifies the default.
 With no profiles configured, the top-level booleans are `false` and
 `expiresAt` is `null`.
+
+`--all-profiles` opts into combined read-only results for `hello`, `accounts`,
+`account`, `balance`, `transactions`, `transaction`, `export`, and `summary`.
+It cannot be combined with `--profile` and is not supported by status, login,
+logout, refresh, profile management, or transfers. Those commands also reject
+multiple selected profiles. Combined results identify
+their source profiles. Shared accounts are deduplicated by the bank account key
+and counted once in summaries;
+transaction and export rows include the profile used to fetch them. If a profile
+cannot authenticate or a request fails, the output is marked incomplete and
+identifies the affected profile. When an account name matches more than one
+account, select a profile or use its exact account key.
+For aggregate transactions, `--limit` caps the combined output, keeping the
+newest rows across accounts.
+
+Profile selection does not change account types: `accounts --all-profiles` uses
+normal account filters; add `--all` or individual type flags independently.
+Other read commands keep their existing account-type policy.
+
+Combined summaries describe accessible accounts, with source-profile attribution,
+without claiming ownership or household membership. Transfers between included
+accounts are excluded from income and spending. The combined JSON contains
+`balancesByCurrency`, `positiveBalancesByCurrency`, `negativeBalancesByCurrency`,
+and `cashFlowByCurrency`. Each cash-flow entry contains income, spending, net,
+savings rate, monthly totals, categories, counterparties, and subscriptions
+for that currency. Posted transaction amounts use the queried account's currency;
+there is no currency conversion. Single-profile JSON keeps its released fields.
+
+
+Profile rename waits for an active token refresh to save its result. If a
+profile changes while BankID login is pending, that login fails without saving;
+run login again with the current profile name.
 
 `--mask` is a global flag for sharing screenshots: it replaces sensitive values
 (amounts, account numbers, owner names, transaction descriptions, counterparties,

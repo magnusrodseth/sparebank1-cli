@@ -189,7 +189,7 @@ impl ApiClient {
                     .into_iter()
                     .map(ClassifiedItem::into_transaction)
                     .collect(),
-                errors: Vec::new(),
+                errors: body.errors,
             })
         } else {
             Ok(resp.json()?)

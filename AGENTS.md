@@ -54,11 +54,30 @@ Secret storage backend is chosen with `SB1_STORE` (`keychain` default, `op` for
 - `sb1 login --profile <profile-name>` creates a profile after confirmation or
   reauthenticates that profile. Each person completes their own BankID login.
 - `sb1 profile set-default <profile-name>` changes the default designation.
+- `sb1 profile rename <old-name> <new-name>` renames a profile and preserves its login.
 - `refresh` and `logout` require `--profile` when multiple profiles exist.
 - Transfers always use one profile and require `--profile` when multiple
   profiles exist. Confirm the selected profile in the transfer summary.
-- Profiles isolate credentials and tokens. Phase 1 has no combined banking
-  data view; `accounts --all` means all account types within one profile.
+- Profiles isolate credentials and tokens. Repeat `--profile` to combine an
+  explicitly selected subset for a read, or use `--all-profiles` for every profile.
+  Commands that require one profile reject multiple selections.
+- Profile selection does not change account-type filters. Add `accounts --all`
+  independently when all account types are needed.
+- `--all-profiles` is an opt-in read-only view for `hello`, `accounts`,
+  `account`, `balance`, `transactions`, `transaction`, `export`, and `summary`.
+  It is mutually exclusive with `--profile` and unsupported for status, login,
+  logout, refresh, profile management, and transfers.
+- Aggregate account lists deduplicate by bank account key. Shared accounts are
+  counted once in balances and summaries, and transaction/export rows identify
+  the profile used to fetch them. Check `complete` and `errors` in JSON, or
+  stderr warnings in table/CSV mode; do not present incomplete data as complete.
+- Combined summaries describe accessible accounts, not ownership. Read balances
+  from `balancesByCurrency`, `positiveBalancesByCurrency`, and
+  `negativeBalancesByCurrency`; cash-flow metrics are in `cashFlowByCurrency`.
+  Keep currencies separate when interpreting results. Single-profile JSON is unchanged.
+- Never combine personal finance contexts automatically. Household-level
+  interpretations belong in a separately maintained aggregate context, with
+  personal context notes kept attributed to their profile.
 
 ## Install the agent skills
 

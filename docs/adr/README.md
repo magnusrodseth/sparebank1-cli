@@ -15,11 +15,11 @@ Routine fixes, release bumps, and cosmetic changes do not receive separate ADRs.
 | [0004](0004-mask-table-output-only.md) | Table masking with unchanged JSON and CSV | Accepted, historical |
 | [0005](0005-private-personal-finance-context.md) | Private personal finance context | Accepted, historical |
 | [0006](0006-isolated-banking-profiles.md) | Isolated banking profiles and legacy compatibility | Accepted, historical |
-| [0007](0007-combined-account-views.md) | Explicit combined account views | Proposed |
+| [0007](0007-combined-account-views.md) | Explicit combined account views | Accepted |
 
-ADR 0007 records the current design discussion and comes after the profile decision it extends.
-Its command syntax and output fields are proposals, not features available in v1.2.0.
-The implementation is being reviewed separately in [#3](https://github.com/magnusrodseth/sparebank1-cli/pull/3).
+ADR 0007 extends the isolated-profile decision with the accepted combined-view contract.
+Its implementation is reviewed in [#3](https://github.com/magnusrodseth/sparebank1-cli/pull/3).
+These extensions are not available in the earlier v1.2.0 release.
 
 Append future records using the next unused number.
 When a decision changes, retain its historical record and link to the record that supersedes it.

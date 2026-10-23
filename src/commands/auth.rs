@@ -82,6 +82,17 @@ pub fn login(args: LoginArgs, selected: Option<&str>) -> anyhow::Result<()> {
         println!("Aborted.");
         return Ok(());
     }
+    // A pending BankID flow must not overwrite a newer login, logout, or a
+    // different profile created under the same name after a rename.
+    let original_secrets = if existing.is_some() {
+        let _lock = crate::profiles::lock_current_profile(&profile)?;
+        Some((
+            secrets::kv_get(&profile.credential_key())?,
+            secrets::kv_get(&profile.token_key())?,
+        ))
+    } else {
+        None
+    };
     let creds = resolve_credentials(&args, existing.as_ref())?;
 
     // Show all storage options up front so the choice is informed.
@@ -100,23 +111,37 @@ pub fn login(args: LoginArgs, selected: Option<&str>) -> anyhow::Result<()> {
     }
 
     let token = auth::login(&creds).context("BankID login failed")?;
-    if existing.is_none() {
-        Registry::update(|latest| {
-            if latest.get_optional(&name).is_some() {
-                anyhow::bail!("profile '{name}' already exists");
+    Registry::update(|latest| {
+        if let Some(original) = &existing {
+            if !latest
+                .get_optional(&name)
+                .is_some_and(|current| current.legacy == original.legacy)
+            {
+                anyhow::bail!(
+                    "profile '{name}' changed or was renamed during login; run login again with the current --profile"
+                );
             }
-            if !args.no_save_credentials {
-                secrets::save_credentials_for(&profile, &creds).context("saving credentials")?;
+            let current_secrets = (
+                secrets::kv_get(&profile.credential_key())?,
+                secrets::kv_get(&profile.token_key())?,
+            );
+            if original_secrets.as_ref() != Some(&current_secrets) {
+                anyhow::bail!(
+                    "profile '{name}' login changed during BankID authentication; run login again"
+                );
             }
-            secrets::save_token_for(&profile, &token).context("saving token")?;
-            latest.add(profile.clone())
-        })?;
-    } else {
+        } else if latest.get_optional(&name).is_some() {
+            anyhow::bail!("profile '{name}' already exists");
+        }
         if !args.no_save_credentials {
             secrets::save_credentials_for(&profile, &creds).context("saving credentials")?;
         }
         secrets::save_token_for(&profile, &token).context("saving token")?;
-    }
+        if existing.is_none() {
+            latest.add(profile.clone())?;
+        }
+        Ok(())
+    })?;
     let expiry = Local
         .timestamp_opt(token.expires_at, 0)
         .single()
@@ -145,11 +170,15 @@ fn confirm_new_profile(name: &str) -> anyhow::Result<bool> {
 }
 
 pub fn logout(all: bool, selected: Option<&str>) -> anyhow::Result<()> {
-    let registry = Registry::load()?;
-    let profile = registry.select(selected, true)?;
-    secrets::delete_token_for(&profile)?;
+    let profile = Registry::update(|registry| {
+        let profile = registry.select(selected, true)?;
+        secrets::delete_token_for(&profile)?;
+        if all {
+            secrets::delete_credentials_for(&profile)?;
+        }
+        Ok(profile)
+    })?;
     if all {
-        secrets::delete_credentials_for(&profile)?;
         println!(
             "✅ Logged out profile '{}' and removed stored client credentials.",
             profile.name
@@ -246,12 +275,56 @@ fn profile_status(profile: &Profile, registry: &Registry) -> anyhow::Result<serd
     }))
 }
 
-pub fn hello(selected: Option<&str>) -> anyhow::Result<()> {
-    let registry = Registry::load()?;
-    let profile = registry.select(selected, false)?;
-    let client = crate::commands::authed_client_for(&profile)?;
-    let msg = client.hello().context("hello world request failed")?;
-    println!("{msg}");
+pub fn hello(
+    selection: &crate::profiles::ProfileSelection,
+    mode: OutputMode,
+) -> anyhow::Result<()> {
+    let mut clients = crate::commands::aggregate::clients_for(selection)?;
+    if !clients.aggregated {
+        let msg = clients.clients[0]
+            .client
+            .hello()
+            .context("hello world request failed")?;
+        println!("{msg}");
+        return Ok(());
+    }
+
+    let mut results = Vec::new();
+    let mut failures = Vec::new();
+    for entry in &clients.clients {
+        if clients.is_rate_limited() {
+            break;
+        }
+        match entry.client.hello() {
+            Ok(message) => results.push(serde_json::json!({
+                "profile": entry.profile.name,
+                "message": message,
+            })),
+            Err(error) => {
+                let rate_limited = matches!(error, crate::error::Sb1Error::RateLimited { .. });
+                failures.push((entry.profile.name.clone(), anyhow::Error::from(error)));
+                if rate_limited {
+                    break;
+                }
+            }
+        }
+    }
+    for (profile, error) in failures {
+        clients.add_api_error(&profile, error);
+    }
+    clients.report_failures();
+    if mode == OutputMode::Json {
+        return crate::format::print_json(&serde_json::json!({
+            "complete": clients.complete(),
+            "profiles": clients.profiles,
+            "results": results,
+            "errors": clients.failures_json(),
+        }));
+    }
+
+    for result in results {
+        println!("{}: {}", result["profile"], result["message"]);
+    }
     Ok(())
 }
 

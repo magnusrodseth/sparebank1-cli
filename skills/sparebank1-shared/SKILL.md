@@ -48,8 +48,22 @@ independently authenticated profile. `CLIENT_ID` and `CLIENT_SECRET` in `.env`
 provide one credential pair for initial setup; pass another profile's client
 credentials with `--client-id` and `--client-secret` (or environment
 variables). `sb1 profile set-default <profile-name>` changes the designation.
+`sb1 profile rename <old-name> <new-name>` changes a profile's local name
+without requiring a new BankID login; the default designation follows the rename.
 `refresh` and `logout` require `--profile` when multiple profiles exist.
-Phase 1 has no aggregate banking-data commands.
+Repeat `--profile` to select a subset for combined reads. Commands requiring
+one profile reject multiple selected profiles. Repeated names are queried once.
+Read-only commands accept `--all-profiles` to combine results from every
+configured profile: `hello`, `accounts`, `account`, `balance`, `transactions`,
+`transaction`, `export`, and `summary`. This option is mutually exclusive with
+`--profile` and is not supported for status, login, logout, refresh, profile
+management, or transfers.
+Aggregate account lists deduplicate accounts by the bank account key. Shared
+accounts are counted once in balances and summaries; transaction and export
+rows include the profile used to fetch them. JSON aggregate responses contain
+`complete` and `errors`; in table or CSV mode, read stderr warnings for partial
+failures. Never describe an incomplete result as complete. If an account
+reference is ambiguous, use `--profile` or its exact bank account key.
 
 Tokens auto-refresh before expiry; the user normally does not re-login between
 sessions. Secrets live in one of three backends, chosen by `SB1_STORE`:
@@ -62,7 +76,11 @@ sessions. Secrets live in one of three backends, chosen by `SB1_STORE`:
 
 When more than one profile exists, transfers also require `--profile`. The
 confirmation summary names the selected profile. `accounts --all` selects all
-account types for one profile; it does not combine profiles.
+account types independently of profile selection. `accounts --all-profiles`
+keeps normal type filters; add `--all` or individual type flags when needed.
+Combined summaries describe accessible accounts and expose balance maps by
+currency plus `cashFlowByCurrency`. Interpret each currency separately and
+preserve source attribution. Single-profile JSON keeps the released fields.
 
 If a command reports "not logged in" or the client secret is rejected, tell the
 user to run `sb1 login` (the secret has limited validity and may need rotating

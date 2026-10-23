@@ -197,6 +197,8 @@ pub type Balance = serde_json::Value;
 pub struct ClassifiedResponse {
     #[serde(default)]
     pub transactions: Vec<ClassifiedItem>,
+    #[serde(default)]
+    pub errors: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]

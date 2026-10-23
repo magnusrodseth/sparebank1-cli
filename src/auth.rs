@@ -122,6 +122,7 @@ fn open_authorize_page(url: &str) {
 /// Never triggers an interactive login on its own, that is reserved for the
 /// explicit `login` command so non-interactive use fails loudly.
 pub fn valid_access_token(profile: &Profile) -> Result<String> {
+    let _lock = crate::profiles::lock_current_profile(profile)?;
     let token = secrets::load_token_for(profile)?.ok_or(Sb1Error::NotAuthenticated)?;
     if token.is_valid() {
         return Ok(token.access_token);
@@ -140,6 +141,7 @@ pub fn valid_access_token(profile: &Profile) -> Result<String> {
 
 /// Force a refresh using the stored refresh token. Returns the new token.
 pub fn force_refresh(profile: &Profile) -> Result<StoredToken> {
+    let _lock = crate::profiles::lock_current_profile(profile)?;
     let token = secrets::load_token_for(profile)?.ok_or(Sb1Error::NotAuthenticated)?;
     let creds = secrets::load_credentials_for(profile)?.ok_or(Sb1Error::NotAuthenticated)?;
     let rt = token
@@ -199,6 +201,14 @@ fn post_token(params: &[(&str, &str)]) -> Result<StoredToken> {
     if status.is_success() {
         let body: TokenResponse = resp.json()?;
         return Ok(body.into_stored());
+    }
+    if status.as_u16() == 429 {
+        let retry_after = resp
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok());
+        return Err(Sb1Error::RateLimited { retry_after });
     }
     // Distinguish the two OAuth failure modes so the user gets the right fix:
     //   invalid_grant  -> stored login/refresh token expired -> `sb1 login`

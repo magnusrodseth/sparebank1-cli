@@ -1,6 +1,6 @@
 //! Local profile registry. It contains labels and storage references, never secrets.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::secrets;
@@ -29,6 +29,55 @@ impl Profile {
             "oauth-token".into()
         } else {
             format!("profile-{}-oauth-token", encode_name(&self.name))
+        }
+    }
+}
+
+/// The profiles explicitly selected for a read, or the implicit default.
+#[derive(Debug, Clone)]
+pub enum ProfileSelection {
+    Default,
+    Named(Vec<String>),
+    All,
+}
+
+impl ProfileSelection {
+    pub fn new(names: &[String], all: bool) -> Self {
+        if all {
+            return Self::All;
+        }
+        let mut unique = Vec::new();
+        for name in names {
+            if !unique.contains(name) {
+                unique.push(name.clone());
+            }
+        }
+        if unique.is_empty() {
+            Self::Default
+        } else {
+            Self::Named(unique)
+        }
+    }
+
+    pub fn is_combined(&self) -> bool {
+        matches!(self, Self::All) || matches!(self, Self::Named(names) if names.len() > 1)
+    }
+
+    pub fn single_name(&self) -> Option<&str> {
+        match self {
+            Self::Named(names) if names.len() == 1 => Some(&names[0]),
+            _ => None,
+        }
+    }
+
+    pub fn resolve(&self, registry: &Registry) -> Result<Vec<Profile>> {
+        match self {
+            Self::Default => Ok(vec![registry.selected_default()?]),
+            Self::Named(names) => names.iter().map(|name| registry.get(name)).collect(),
+            Self::All if registry.profiles.is_empty() => {
+                bail!("no profile configured; run sb1 login first")
+            }
+            Self::All => Ok(registry.profiles.clone()),
         }
     }
 }
@@ -127,6 +176,28 @@ impl Registry {
         Ok(())
     }
 
+    fn rename(&mut self, old_name: &str, new_name: &str) -> Result<Profile> {
+        validate_name(new_name)?;
+        let old = self.get(old_name)?;
+        if old_name == new_name {
+            return Ok(old);
+        }
+        if self.get_optional(new_name).is_some() {
+            bail!("profile '{new_name}' already exists");
+        }
+
+        let profile = self
+            .profiles
+            .iter_mut()
+            .find(|profile| profile.name == old_name)
+            .expect("profile was found above");
+        profile.name = new_name.to_owned();
+        if self.default_profile.as_deref() == Some(old_name) {
+            self.default_profile = Some(new_name.to_owned());
+        }
+        Ok(old)
+    }
+
     pub fn get_optional(&self, name: &str) -> Option<Profile> {
         self.profiles.iter().find(|p| p.name == name).cloned()
     }
@@ -142,6 +213,61 @@ impl Registry {
         }
         Ok(())
     }
+}
+
+/// Keep a selected profile's storage keys stable while reading or replacing its
+/// login. Revalidate after locking because a rename may follow profile selection.
+pub(crate) fn lock_current_profile(profile: &Profile) -> crate::error::Result<std::fs::File> {
+    let lock = secrets::lock_profiles()?;
+    let registry = Registry::load_locked().map_err(|error| {
+        crate::error::Sb1Error::AuthFlow(format!("reading profile registry: {error}"))
+    })?;
+    if !registry
+        .get_optional(&profile.name)
+        .is_some_and(|current| current.legacy == profile.legacy)
+    {
+        return Err(crate::error::Sb1Error::AuthFlow(format!(
+            "profile '{}' changed or was renamed; select it again with --profile",
+            profile.name
+        )));
+    }
+    Ok(lock)
+}
+
+/// Rename a profile while holding the registry lock through secret migration.
+/// Legacy profiles keep their original name-independent secret keys.
+pub fn rename_profile(old_name: &str, new_name: &str) -> Result<Option<String>> {
+    validate_name(new_name)?;
+    let _lock = secrets::lock_profiles()?;
+    let mut registry = Registry::load_locked()?;
+    let old_profile = registry.rename(old_name, new_name)?;
+    if old_name == new_name {
+        return Ok(None);
+    }
+
+    let new_profile = registry.get(new_name)?;
+    if !old_profile.legacy {
+        secrets::copy_profile_secrets(&old_profile, &new_profile)
+            .context("copying profile secrets for rename")?;
+    }
+
+    if let Err(error) = registry.save() {
+        if !old_profile.legacy {
+            if let Err(cleanup) = secrets::delete_profile_secrets(&new_profile) {
+                bail!(
+                    "saving renamed profile failed: {error}; destination cleanup failed: {cleanup}"
+                );
+            }
+        }
+        return Err(error).context("saving renamed profile");
+    }
+
+    if !old_profile.legacy {
+        if let Err(error) = secrets::delete_profile_secrets(&old_profile) {
+            return Ok(Some(error.to_string()));
+        }
+    }
+    Ok(None)
 }
 
 pub fn validate_name(name: &str) -> Result<()> {

@@ -1,31 +1,38 @@
 //! `sb1 summary` — a financial overview computed generically from the API.
 //!
-//! Everything here is derived from data the API returns for any SpareBank 1
-//! customer, with no hardcoded merchants or account assumptions:
-//!
-//! - **Net worth** sums account balances per currency; account `type` decides
-//!   asset vs liability (credit cards / loans are negative balances already).
-//! - **Internal transfers** between the user's own accounts are excluded from
-//!   income/spending by matching a transaction's counterparty number against the
-//!   set of the user's own account numbers (and IBANs). This works regardless of
-//!   how many accounts the user has or what they are named.
-//! - **Categories, recurring and subscription** flags come from the bank's own
-//!   classification (`/transactions/classified`), not keyword guesses. If that
-//!   endpoint is unavailable we fall back to plain transactions (no categories).
+//! Reports use bank classifications and exclude transfers between included
+//! accounts. Combined summaries group monetary metrics by account currency.
+//! Single-profile JSON retains the released field names and calculations.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use anyhow::Context;
 
 use crate::client::TxnQuery;
-use crate::format::{self, OutputMode};
+use crate::format::{self, money, OutputMode};
 use crate::models::{Account, Transaction};
-use crate::profiles::Profile;
-use crate::util::{self, format_kr};
+use crate::util;
 
-pub fn run(months: i64, mode: OutputMode, mask: bool, profile: &Profile) -> anyhow::Result<()> {
+pub fn run(
+    months: i64,
+    mode: OutputMode,
+    mask: bool,
+    selection: &crate::profiles::ProfileSelection,
+) -> anyhow::Result<()> {
+    if selection.is_combined() {
+        return run_aggregate(months, mode, mask, selection);
+    }
+    let clients = crate::commands::aggregate::clients_for(selection)?;
+    run_single(months, mode, mask, &clients.clients[0].client)
+}
+
+fn run_single(
+    months: i64,
+    mode: OutputMode,
+    mask: bool,
+    client: &crate::client::ApiClient,
+) -> anyhow::Result<()> {
     let months = months.max(1);
-    let client = crate::commands::authed_client_for(profile)?;
 
     // All account types so net worth and transactions are complete.
     let opts = crate::client::AccountListOpts {
@@ -37,7 +44,7 @@ pub fn run(months: i64, mode: OutputMode, mask: bool, profile: &Profile) -> anyh
     };
     let accounts = client.accounts(&opts).context("listing accounts")?;
 
-    let own_numbers = own_account_numbers(&accounts);
+    let included_numbers = included_account_numbers(&accounts);
     let keys: Vec<String> = accounts.iter().map(|a| a.key.clone()).collect();
 
     let from = util::days_ago(months * 30);
@@ -63,20 +70,181 @@ pub fn run(months: i64, mode: OutputMode, mask: bool, profile: &Profile) -> anyh
         }
     };
 
-    let report = build_report(&accounts, &txns, &own_numbers, months, &from, &to);
+    let report = build_report(&accounts, &txns, &included_numbers, months, &from, &to);
 
     match mode {
         OutputMode::Json => report.print_json(),
         OutputMode::Table => {
-            report.print_table(mask);
+            report.print_table(mask, None);
             Ok(())
         }
     }
 }
 
-/// Digits of every account number and IBAN the user owns, for internal-transfer
-/// detection.
-fn own_account_numbers(accounts: &[Account]) -> HashSet<String> {
+fn run_aggregate(
+    months: i64,
+    mode: OutputMode,
+    mask: bool,
+    selection: &crate::profiles::ProfileSelection,
+) -> anyhow::Result<()> {
+    let months = months.max(1);
+    let mut clients = crate::commands::aggregate::clients_for(selection)?;
+    let entries = clients.fetch_accounts(&crate::commands::accounts::all_accounts_opts());
+    let accounts: Vec<Account> = entries.iter().map(|entry| entry.account.clone()).collect();
+    let included_numbers = included_account_numbers(&accounts);
+    let from = util::days_ago(months * 30);
+    let to = util::today();
+    let mut txns = Vec::new();
+
+    for entry in &entries {
+        if clients.is_rate_limited() {
+            break;
+        }
+        let account_key = match crate::commands::aggregate::account_key(entry) {
+            Ok(key) => key.to_owned(),
+            Err(error) => {
+                let source = entry.profiles.first().cloned().unwrap_or_default();
+                clients.add_failure(&source, error);
+                continue;
+            }
+        };
+        let query = TxnQuery {
+            account_keys: vec![account_key],
+            from_date: Some(from.clone()),
+            to_date: Some(to.clone()),
+            row_limit: None,
+            source: Some("ALL".to_string()),
+            classified: true,
+        };
+        let result = clients.first_success(&entry.profiles, |profile_client| match profile_client
+            .client
+            .transactions(&query)
+        {
+            Ok(response) => Ok(response),
+            Err(classified_error)
+                if matches!(
+                    classified_error,
+                    crate::error::Sb1Error::Api { status: 404, .. }
+                ) =>
+            {
+                let fallback_query = TxnQuery {
+                    classified: false,
+                    ..query.clone()
+                };
+                match profile_client.client.transactions(&fallback_query) {
+                    Ok(response) => Ok(response),
+                    Err(fallback_error) => Err(anyhow::Error::from(fallback_error).context(
+                        format!("classified endpoint unavailable ({classified_error})"),
+                    )),
+                }
+            }
+            Err(error) => Err(anyhow::Error::from(error)),
+        });
+        if let Some((source, response)) = result {
+            for error in response.errors {
+                clients.add_failure(&source, error);
+            }
+            // A single-account request gives the currency of the posted amount.
+            // Do not use the original purchase currency as an exchange rate.
+            let currency = entry.account.currency().to_owned();
+            txns.extend(
+                response
+                    .transactions
+                    .into_iter()
+                    .map(|txn| (currency.clone(), txn)),
+            );
+        }
+    }
+
+    clients.report_failures();
+    let reports = combined_reports(&accounts, &txns, &included_numbers, months, &from, &to);
+    match mode {
+        OutputMode::Json => {
+            let mut balances = BTreeMap::new();
+            let mut positive = BTreeMap::new();
+            let mut negative = BTreeMap::new();
+            let mut flows = BTreeMap::new();
+            for (currency, report) in &reports {
+                balances.insert(
+                    currency,
+                    report.net_worth.get(currency).copied().unwrap_or(0.0),
+                );
+                positive.insert(currency, report.assets);
+                negative.insert(currency, report.liabilities);
+                let mut flow = report.json_value();
+                let fields = flow.as_object_mut().expect("report object");
+                for field in ["period", "netWorth", "assets", "liabilities"] {
+                    fields.remove(field);
+                }
+                flows.insert(currency, flow);
+            }
+            format::print_json(&serde_json::json!({
+                "period": {"months": months, "from": from, "to": to},
+                "balancesByCurrency": balances,
+                "positiveBalancesByCurrency": positive,
+                "negativeBalancesByCurrency": negative,
+                "cashFlowByCurrency": flows,
+                "accounts": entries.iter().map(|entry| serde_json::json!({
+                    "key": entry.account.key,
+                    "name": entry.account.name,
+                    "currency": entry.account.currency(),
+                    "profiles": entry.profiles,
+                    "shared": entry.profiles.len() > 1,
+                })).collect::<Vec<_>>(),
+                "complete": clients.complete(),
+                "profiles": clients.profiles,
+                "errors": clients.failures_json(),
+            }))
+        }
+        OutputMode::Table => {
+            println!(
+                "Combined account summary across profiles: {}",
+                clients.profiles.join(", ")
+            );
+            if !clients.complete() {
+                println!("⚠ Combined account summary is incomplete; see profile errors on stderr.");
+            }
+            println!("Accessible accounts");
+            format::aggregate_accounts_table(&entries, mask);
+            for (currency, report) in &reports {
+                report.print_table(mask, Some(currency));
+            }
+            Ok(())
+        }
+    }
+}
+
+fn combined_reports(
+    accounts: &[Account],
+    transactions: &[(String, Transaction)],
+    included_numbers: &HashSet<String>,
+    months: i64,
+    from: &str,
+    to: &str,
+) -> BTreeMap<String, Report> {
+    let mut currencies: BTreeSet<_> = accounts.iter().map(|a| a.currency().to_owned()).collect();
+    currencies.extend(transactions.iter().map(|(currency, _)| currency.clone()));
+    currencies
+        .into_iter()
+        .map(|currency| {
+            let accounts: Vec<_> = accounts
+                .iter()
+                .filter(|a| a.currency() == currency)
+                .cloned()
+                .collect();
+            let txns: Vec<_> = transactions
+                .iter()
+                .filter(|(ccy, _)| *ccy == currency)
+                .map(|(_, txn)| txn.clone())
+                .collect();
+            let report = build_report(&accounts, &txns, included_numbers, months, from, to);
+            (currency, report)
+        })
+        .collect()
+}
+
+/// Digits of every included account number and IBAN, for transfer detection.
+fn included_account_numbers(accounts: &[Account]) -> HashSet<String> {
     let mut set = HashSet::new();
     for a in accounts {
         let n = a.number_raw();
@@ -93,11 +261,11 @@ fn own_account_numbers(accounts: &[Account]) -> HashSet<String> {
     set
 }
 
-fn is_internal(t: &Transaction, own: &HashSet<String>) -> bool {
+fn is_between_included_accounts(t: &Transaction, included: &HashSet<String>) -> bool {
     match &t.remote_account_number {
         Some(n) => {
             let d: String = n.chars().filter(|c| c.is_ascii_digit()).collect();
-            !d.is_empty() && own.contains(&d)
+            !d.is_empty() && included.contains(&d)
         }
         None => false,
     }
@@ -121,7 +289,7 @@ struct Report {
 fn build_report(
     accounts: &[Account],
     txns: &[Transaction],
-    own: &HashSet<String>,
+    included: &HashSet<String>,
     months: i64,
     from: &str,
     to: &str,
@@ -147,7 +315,7 @@ fn build_report(
     let mut subs: BTreeMap<String, f64> = BTreeMap::new();
 
     for t in txns {
-        if is_internal(t, own) {
+        if is_between_included_accounts(t, included) {
             continue;
         }
         let amt = t.amount_value();
@@ -224,9 +392,13 @@ impl Report {
         }
     }
 
-    fn print_table(&self, mask: bool) {
+    fn print_table(&self, mask: bool, currency: Option<&str>) {
         use crate::util::{kr, MASKED};
         use comfy_table::{Cell, CellAlignment};
+        let amount = |value| match currency {
+            Some(ccy) => money(value, ccy, mask),
+            None => kr(value, mask),
+        };
         // Counterparty/subscription names are personal, so they are masked too;
         // category labels, dates and month labels are not.
         let name = |s: &str| {
@@ -236,28 +408,57 @@ impl Report {
                 s.to_string()
             }
         };
+        let title = if currency.is_some() {
+            "Combined account summary"
+        } else {
+            "Financial summary"
+        };
         println!(
-            "Financial summary  ({} month(s): {} → {})\n",
+            "{title}  ({} month(s): {} → {})\n",
             self.months, self.from, self.to
         );
 
         // Net worth
-        println!("Net worth");
+        println!(
+            "{}",
+            if currency.is_some() {
+                "Account balances"
+            } else {
+                "Net worth"
+            }
+        );
         for (ccy, total) in &self.net_worth {
             println!("  {ccy}: {}", money(*total, ccy, mask));
         }
         println!(
-            "  assets {}   liabilities {}",
-            kr(self.assets, mask),
-            kr(self.liabilities, mask)
+            "  {} {}   {} {}",
+            if currency.is_some() {
+                "positive balances"
+            } else {
+                "assets"
+            },
+            amount(self.assets),
+            if currency.is_some() {
+                "negative balances"
+            } else {
+                "liabilities"
+            },
+            amount(self.liabilities)
         );
 
         // Cash flow
         let net = self.income + self.spending;
-        println!("\nCash flow (internal transfers excluded)");
-        println!("  income    {:>14}", kr(self.income, mask));
-        println!("  spending  {:>14}", kr(self.spending, mask));
-        println!("  net       {:>14}", kr(net, mask));
+        println!(
+            "\nCash flow ({})",
+            if currency.is_some() {
+                "transfers between included accounts excluded"
+            } else {
+                "internal transfers excluded"
+            }
+        );
+        println!("  income    {:>14}", amount(self.income));
+        println!("  spending  {:>14}", amount(self.spending));
+        println!("  net       {:>14}", amount(net));
         if let Some(rate) = self.savings_rate() {
             if mask {
                 println!("  savings rate: ***%");
@@ -267,8 +468,8 @@ impl Report {
         }
         println!(
             "  monthly avg: in {}, out {}",
-            kr(self.income / self.months as f64, mask),
-            kr(self.spending / self.months as f64, mask)
+            amount(self.income / self.months as f64),
+            amount(self.spending / self.months as f64)
         );
 
         // Monthly breakdown
@@ -277,9 +478,9 @@ impl Report {
         for (m, (i, o)) in &self.monthly {
             t.add_row(vec![
                 Cell::new(m),
-                Cell::new(kr(*i, mask)).set_alignment(CellAlignment::Right),
-                Cell::new(kr(*o, mask)).set_alignment(CellAlignment::Right),
-                Cell::new(kr(i + o, mask)).set_alignment(CellAlignment::Right),
+                Cell::new(amount(*i)).set_alignment(CellAlignment::Right),
+                Cell::new(amount(*o)).set_alignment(CellAlignment::Right),
+                Cell::new(amount(i + o)).set_alignment(CellAlignment::Right),
             ]);
         }
         println!("\nBy month");
@@ -292,7 +493,7 @@ impl Report {
             for (c, v) in &self.categories {
                 t.add_row(vec![
                     Cell::new(c),
-                    Cell::new(kr(*v, mask)).set_alignment(CellAlignment::Right),
+                    Cell::new(amount(*v)).set_alignment(CellAlignment::Right),
                 ]);
             }
             println!("\nSpending by category (bank-classified)");
@@ -305,7 +506,7 @@ impl Report {
         for (p, v) in &self.top_out {
             t.add_row(vec![
                 Cell::new(name(p)),
-                Cell::new(kr(*v, mask)).set_alignment(CellAlignment::Right),
+                Cell::new(amount(*v)).set_alignment(CellAlignment::Right),
             ]);
         }
         println!("\nTop outgoing");
@@ -318,7 +519,7 @@ impl Report {
             for (n, v) in &self.subscriptions {
                 t.add_row(vec![
                     Cell::new(name(n)),
-                    Cell::new(kr(*v, mask)).set_alignment(CellAlignment::Right),
+                    Cell::new(amount(*v)).set_alignment(CellAlignment::Right),
                 ]);
             }
             println!("\nLikely subscriptions (bank-flagged)");
@@ -327,8 +528,12 @@ impl Report {
     }
 
     fn print_json(&self) -> anyhow::Result<()> {
+        format::print_json(&self.json_value())
+    }
+
+    fn json_value(&self) -> serde_json::Value {
         let net: f64 = self.income + self.spending;
-        format::print_json(&serde_json::json!({
+        serde_json::json!({
             "period": { "months": self.months, "from": self.from, "to": self.to },
             "netWorth": self.net_worth,
             "assets": self.assets,
@@ -343,7 +548,7 @@ impl Report {
             "topOutgoing": self.top_out.iter().map(|(p,v)| serde_json::json!({"party": p, "amount": v})).collect::<Vec<_>>(),
             "categories": self.categories.iter().map(|(c,v)| serde_json::json!({"category": c, "amount": v})).collect::<Vec<_>>(),
             "subscriptions": self.subscriptions.iter().map(|(n,v)| serde_json::json!({"name": n, "amount": v})).collect::<Vec<_>>(),
-        }))
+        })
     }
 }
 
@@ -352,16 +557,4 @@ fn base() -> comfy_table::Table {
     t.load_preset(comfy_table::presets::UTF8_FULL)
         .set_content_arrangement(comfy_table::ContentArrangement::Dynamic);
     t
-}
-
-/// Format money in a currency: NOK uses the kr formatter, others a plain suffix.
-fn money(v: f64, ccy: &str, mask: bool) -> String {
-    if mask {
-        return crate::util::mask_kr(v);
-    }
-    if ccy == "NOK" {
-        format_kr(v)
-    } else {
-        format!("{v:.2} {ccy}")
-    }
 }
